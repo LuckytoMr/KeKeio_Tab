@@ -105,6 +105,7 @@ export interface InstallDraft {
 }
 
 const defaultPublicBaseUrl = "https://tab.kekeio.com";
+const defaultSMTPPreset = getSMTPPreset("cloudflare");
 
 const defaultDraft: InstallDraft = {
   adminEmail: "",
@@ -115,12 +116,12 @@ const defaultDraft: InstallDraft = {
   extensionIds: "",
   webOrigins: "",
   registrationEnabled: false,
-  smtpProvider: "custom",
-  smtpHost: "",
-  smtpPort: "587",
-  smtpTls: "starttls",
-  smtpFrom: "",
-  smtpUser: "",
+  smtpProvider: defaultSMTPPreset.id,
+  smtpHost: defaultSMTPPreset.host,
+  smtpPort: defaultSMTPPreset.port,
+  smtpTls: defaultSMTPPreset.tls,
+  smtpFrom: defaultSMTPPreset.defaultFrom ?? "",
+  smtpUser: defaultSMTPPreset.username ?? "",
   smtpPassword: "",
   maxUsers: "100",
   profileKiB: "512",
@@ -136,6 +137,11 @@ const persistedKeys: Array<keyof InstallDraft> = [
   "smtpTls", "smtpFrom", "smtpUser", "maxUsers", "profileKiB", "storageGiB", "versionsPerUser", "accessLogDays", "auditLogDays", "backupDirectory"
 ];
 
+function hasConfiguredSMTPDraft(draft: Partial<InstallDraft>): boolean {
+  if (draft.smtpProvider && draft.smtpProvider !== "custom") return true;
+  return [draft.smtpHost, draft.smtpFrom, draft.smtpUser].some((value) => typeof value === "string" && value.trim() !== "");
+}
+
 function loadProgress(): { draft: InstallDraft; stepIndex: number } {
   try {
     const raw = window.sessionStorage.getItem("fullpro:install:draft");
@@ -145,13 +151,25 @@ function loadProgress(): { draft: InstallDraft; stepIndex: number } {
     const publicBaseUrl = typeof persistedDraft.publicBaseUrl === "string" && persistedDraft.publicBaseUrl.trim()
       ? persistedDraft.publicBaseUrl
       : defaultPublicBaseUrl;
-    const smtpProvider = persistedDraft.smtpProvider ?? detectSMTPProvider({
-      host: persistedDraft.smtpHost ?? defaultDraft.smtpHost,
-      port: persistedDraft.smtpPort ?? defaultDraft.smtpPort,
-      tls: persistedDraft.smtpTls ?? defaultDraft.smtpTls
-    });
+    const upgradeBlankSMTP = !hasConfiguredSMTPDraft(persistedDraft);
+    const smtpDraft = upgradeBlankSMTP ? {
+      smtpProvider: defaultDraft.smtpProvider,
+      smtpHost: defaultDraft.smtpHost,
+      smtpPort: defaultDraft.smtpPort,
+      smtpTls: defaultDraft.smtpTls,
+      smtpFrom: defaultDraft.smtpFrom,
+      smtpUser: defaultDraft.smtpUser
+    } : {};
+    const mergedDraft = { ...defaultDraft, ...persistedDraft, ...smtpDraft };
+    const smtpProvider = upgradeBlankSMTP
+      ? defaultDraft.smtpProvider
+      : persistedDraft.smtpProvider ?? detectSMTPProvider({
+        host: mergedDraft.smtpHost,
+        port: mergedDraft.smtpPort,
+        tls: mergedDraft.smtpTls
+      });
     return {
-      draft: { ...defaultDraft, ...persistedDraft, publicBaseUrl, smtpProvider },
+      draft: { ...mergedDraft, publicBaseUrl, smtpProvider },
       stepIndex: Number.isInteger(parsed.stepIndex) ? Math.max(0, parsed.stepIndex ?? 0) : 0
     };
   } catch {
@@ -430,19 +448,23 @@ function PublicApiStep({ draft, patch }: { draft: InstallDraft; patch: PatchDraf
 
 function MailStep({ draft, patch, verified, busy, onTest }: { draft: InstallDraft; patch: PatchDraft; verified: boolean; busy: boolean; onTest: () => void }) {
   const provider = draft.smtpProvider ?? detectSMTPProvider({ host: draft.smtpHost, port: draft.smtpPort, tls: draft.smtpTls });
+  const providerPreset = getSMTPPreset(provider);
   const selectProvider = (id: SMTPProviderId) => {
+    const previousPreset = getSMTPPreset(provider);
     patch("smtpProvider", id);
     if (id === "custom") return;
     const preset = getSMTPPreset(id);
     patch("smtpHost", preset.host);
     patch("smtpPort", preset.port);
     patch("smtpTls", preset.tls);
+    if (preset.username) patch("smtpUser", preset.username);
+    else if (previousPreset.username && draft.smtpUser === previousPreset.username) patch("smtpUser", "");
   };
   const editSMTPField = <K extends "smtpHost" | "smtpPort" | "smtpTls">(key: K, value: InstallDraft[K]) => {
     patch("smtpProvider", "custom");
     patch(key, value);
   };
-  return <section class="workflow-section form-section"><label class="switch-row" htmlFor="registrationEnabled"><span><strong>开放插件注册</strong><small>默认关闭；开启后必须先验证 SMTP。</small></span><input id="registrationEnabled" type="checkbox" checked={draft.registrationEnabled} onChange={(e) => patch("registrationEnabled", e.currentTarget.checked)} /></label>{draft.registrationEnabled ? <><div class="form-grid"><label htmlFor="smtpProvider">邮箱服务商</label><select id="smtpProvider" value={provider} onChange={(e) => selectProvider(e.currentTarget.value as SMTPProviderId)}>{smtpProviderOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select><label htmlFor="smtpHost">SMTP 主机</label><input id="smtpHost" value={draft.smtpHost} onInput={(e) => editSMTPField("smtpHost", e.currentTarget.value)} /><label htmlFor="smtpPort">端口</label><input id="smtpPort" inputMode="numeric" value={draft.smtpPort} onInput={(e) => editSMTPField("smtpPort", e.currentTarget.value)} /><label htmlFor="smtpTls">TLS</label><select id="smtpTls" value={draft.smtpTls} onChange={(e) => editSMTPField("smtpTls", e.currentTarget.value as InstallDraft["smtpTls"])}><option value="tls">直接 TLS</option><option value="starttls">STARTTLS</option><option value="none">无（仅开发）</option></select><label htmlFor="smtpFrom">发件人</label><input id="smtpFrom" type="email" value={draft.smtpFrom} onInput={(e) => patch("smtpFrom", e.currentTarget.value)} /><label htmlFor="smtpUser">用户名</label><input id="smtpUser" autoComplete="username" value={draft.smtpUser} onInput={(e) => patch("smtpUser", e.currentTarget.value)} /><label htmlFor="smtpPassword">密码</label><input id="smtpPassword" type="password" autoComplete="new-password" value={draft.smtpPassword} onInput={(e) => patch("smtpPassword", e.currentTarget.value)} /></div><p class="field-help">{getSMTPPreset(provider).help}</p><button id="smtpTest" class="button secondary" type="button" onClick={onTest} disabled={busy}>{verified ? <><MailCheck size={17} aria-hidden="true" />测试邮件已送达</> : "发送测试邮件"}</button></> : <div class="empty-state compact"><strong>注册保持关闭</strong><p>可跳过邮件配置，安装后在“安全与维护”中完成验证再开放。</p></div>}</section>;
+  return <section class="workflow-section form-section"><label class="switch-row" htmlFor="registrationEnabled"><span><strong>开放插件注册</strong><small>默认关闭；开启后必须先验证 SMTP。</small></span><input id="registrationEnabled" type="checkbox" checked={draft.registrationEnabled} onChange={(e) => patch("registrationEnabled", e.currentTarget.checked)} /></label>{draft.registrationEnabled ? <><div class="form-grid"><label htmlFor="smtpProvider">邮箱服务商</label><select id="smtpProvider" value={provider} onChange={(e) => selectProvider(e.currentTarget.value as SMTPProviderId)}>{smtpProviderOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select><label htmlFor="smtpHost">SMTP 主机</label><input id="smtpHost" value={draft.smtpHost} onInput={(e) => editSMTPField("smtpHost", e.currentTarget.value)} /><label htmlFor="smtpPort">端口</label><input id="smtpPort" inputMode="numeric" value={draft.smtpPort} onInput={(e) => editSMTPField("smtpPort", e.currentTarget.value)} /><label htmlFor="smtpTls">TLS</label><select id="smtpTls" value={draft.smtpTls} onChange={(e) => editSMTPField("smtpTls", e.currentTarget.value as InstallDraft["smtpTls"])}><option value="tls">直接 TLS</option><option value="starttls">STARTTLS</option><option value="none">无（仅开发）</option></select><label htmlFor="smtpFrom">发件人</label><input id="smtpFrom" type="email" value={draft.smtpFrom} onInput={(e) => patch("smtpFrom", e.currentTarget.value)} /><label htmlFor="smtpUser">用户名</label><input id="smtpUser" autoComplete="username" value={draft.smtpUser} readOnly={Boolean(providerPreset.username)} onInput={(e) => patch("smtpUser", e.currentTarget.value)} /><label htmlFor="smtpPassword">{providerPreset.passwordLabel ?? "密码"}</label><input id="smtpPassword" type="password" autoComplete="new-password" value={draft.smtpPassword} aria-describedby="smtp-provider-help" onInput={(e) => patch("smtpPassword", e.currentTarget.value)} /></div><p id="smtp-provider-help" class="field-help">{providerPreset.help}{providerPreset.credentialHelp ? <> {providerPreset.credentialHelp} {providerPreset.credentialUrl && providerPreset.credentialLinkLabel ? <a href={providerPreset.credentialUrl} target="_blank" rel="noopener noreferrer">{providerPreset.credentialLinkLabel}</a> : null}</> : null}</p><button id="smtpTest" class="button secondary" type="button" onClick={onTest} disabled={busy}>{verified ? <><MailCheck size={17} aria-hidden="true" />测试邮件已送达</> : "发送测试邮件"}</button></> : <div class="empty-state compact"><strong>注册保持关闭</strong><p>可跳过邮件配置，安装后在“安全与维护”中完成验证再开放。</p></div>}</section>;
 }
 
 function LimitsStep({ draft, patch }: { draft: InstallDraft; patch: PatchDraft }) {

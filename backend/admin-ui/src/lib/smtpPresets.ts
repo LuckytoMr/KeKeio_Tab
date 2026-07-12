@@ -1,5 +1,5 @@
 export type SMTPTlsMode = "tls" | "starttls" | "none";
-export type SMTPProviderId = "qq" | "netease163" | "gmail" | "custom";
+export type SMTPProviderId = "cloudflare" | "qq" | "netease163" | "gmail" | "custom";
 
 export interface SMTPProviderOption {
   id: SMTPProviderId;
@@ -8,6 +8,12 @@ export interface SMTPProviderOption {
   port: string;
   tls: SMTPTlsMode;
   help: string;
+  username?: string;
+  defaultFrom?: string;
+  passwordLabel?: string;
+  credentialHelp?: string;
+  credentialUrl?: string;
+  credentialLinkLabel?: string;
 }
 
 const customSMTPProvider: SMTPProviderOption = {
@@ -20,6 +26,20 @@ const customSMTPProvider: SMTPProviderOption = {
 };
 
 export const smtpProviderOptions: readonly SMTPProviderOption[] = [
+  {
+    id: "cloudflare",
+    label: "Cloudflare Email Sending",
+    host: "smtp.mx.cloudflare.net",
+    port: "465",
+    tls: "tls",
+    username: "api_token",
+    defaultFrom: "noreply@kekeio.com",
+    passwordLabel: "Cloudflare API Token",
+    credentialHelp: "需要 Account → Email Sending: Edit 权限；发件域名须已在同一 Cloudflare 账号的 Email Sending 中启用。",
+    credentialUrl: "https://dash.cloudflare.com/profile/api-tokens/",
+    credentialLinkLabel: "创建 Cloudflare API Token",
+    help: "Cloudflare 使用 465 端口和直接 TLS；用户名固定为 api_token，密码填写 Cloudflare API Token。"
+  },
   {
     id: "qq",
     label: "QQ 邮箱",

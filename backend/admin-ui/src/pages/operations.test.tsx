@@ -189,6 +189,72 @@ describe("audit and system pages", () => {
     });
   });
 
+  it("defaults an unconfigured SMTP form to Cloudflare without embedding a Token", async () => {
+    const client = clientStub({
+      get: vi.fn().mockResolvedValue({
+        settings: {
+          registrationEnabled: false,
+          publicBaseUrl: "https://tab.kekeio.com",
+          webOrigins: [],
+          maxUsers: 100,
+          profileKiB: 512,
+          storageGiB: 1,
+          versionsPerUser: 50,
+          accessLogDays: 30,
+          auditLogDays: 180
+        }
+      })
+    });
+    const user = userEvent.setup();
+    render(<SystemAreaPage client={client} route={parseAdminLocation("/admin/security")} notify={vi.fn()} />);
+
+    expect(await screen.findByLabelText("邮箱服务商")).toHaveValue("cloudflare");
+    expect(screen.getByLabelText("SMTP 主机")).toHaveValue("smtp.mx.cloudflare.net");
+    expect(screen.getByLabelText("SMTP 端口")).toHaveValue("465");
+    expect(screen.getByLabelText("TLS")).toHaveValue("tls");
+    expect(screen.getByLabelText("发件人")).toHaveValue("noreply@kekeio.com");
+    expect(screen.getByLabelText("SMTP 用户名")).toHaveValue("api_token");
+    expect(screen.getByLabelText("Cloudflare API Token（留空保留现有 Token）")).toHaveValue("");
+    expect(screen.getByText(/Email Sending: Edit/)).toBeInTheDocument();
+    const tokenLink = screen.getByRole("link", { name: "创建 Cloudflare API Token" });
+    expect(tokenLink).toHaveAttribute("href", "https://dash.cloudflare.com/profile/api-tokens/");
+    expect(tokenLink).toHaveAttribute("target", "_blank");
+    expect(tokenLink).toHaveAttribute("rel", expect.stringContaining("noopener"));
+
+    await user.selectOptions(screen.getByLabelText("邮箱服务商"), "gmail");
+    expect(screen.queryByRole("link", { name: "创建 Cloudflare API Token" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("SMTP 密码（留空保留现有密码）")).toHaveValue("");
+  });
+
+  it("does not submit an unconfigured Cloudflare preset before an API Token is entered", async () => {
+    const put = vi.fn().mockResolvedValue({ settings: {} });
+    const client = clientStub({
+      get: vi.fn().mockResolvedValue({
+        settings: {
+          registrationEnabled: false,
+          publicBaseUrl: "https://tab.kekeio.com",
+          webOrigins: [],
+          maxUsers: 100,
+          profileKiB: 512,
+          storageGiB: 1,
+          versionsPerUser: 50,
+          accessLogDays: 30,
+          auditLogDays: 180
+        }
+      }),
+      put
+    });
+    const user = userEvent.setup();
+    render(<SystemAreaPage client={client} route={parseAdminLocation("/admin/security")} notify={vi.fn()} />);
+
+    await user.selectOptions(await screen.findByLabelText("邮箱服务商"), "qq");
+    await user.selectOptions(screen.getByLabelText("邮箱服务商"), "cloudflare");
+    await user.click(screen.getByRole("button", { name: "保存设置" }));
+
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    expect(put.mock.calls[0]?.[1]).not.toHaveProperty("smtp");
+  });
+
   it("tests SMTP settings before enabling registration and never requires the saved password to be re-entered", async () => {
     const post = vi.fn().mockResolvedValue({ verified: true });
     const put = vi.fn().mockResolvedValue({ settings: {} });

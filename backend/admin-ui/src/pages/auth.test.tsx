@@ -62,7 +62,55 @@ describe("InstallWizard", () => {
     await waitFor(() => {
       const progress = JSON.parse(window.sessionStorage.getItem("fullpro:install:draft") || "{}");
       expect(progress.draft?.publicBaseUrl).toBe("https://tab.kekeio.com");
+      expect(progress.draft).toMatchObject({
+        smtpProvider: "cloudflare",
+        smtpHost: "smtp.mx.cloudflare.net",
+        smtpPort: "465",
+        smtpTls: "tls",
+        smtpFrom: "noreply@kekeio.com",
+        smtpUser: "api_token"
+      });
+      expect(progress.draft).not.toHaveProperty("smtpPassword");
     });
+  });
+
+  it("links the default Cloudflare API Token field to the token dashboard", async () => {
+    const post = vi.fn().mockImplementation((path: string) => {
+      if (path === "/install/api/v1/session") return Promise.resolve({ mode: "fresh_install", csrfToken: "csrf-install" });
+      if (path === "/install/api/v1/preflight") return Promise.resolve({ checks: [{ label: "数据目录", status: "pass" }] });
+      return Promise.reject(new Error(`unexpected POST ${path}`));
+    });
+    const client = clientStub({
+      get: vi.fn().mockResolvedValue({ state: "uninitialized", mode: "fresh_install", requiresCode: true }),
+      post: post as unknown as ApiClient["post"]
+    });
+    const user = userEvent.setup();
+    render(<InstallWizard client={client} onInstalled={vi.fn()} />);
+
+    await user.type(await screen.findByLabelText("一次性安装码"), "ABCD-EFGH");
+    await user.click(screen.getByRole("button", { name: "建立安全安装会话" }));
+    await user.click(await screen.findByRole("button", { name: "运行环境检查" }));
+    await user.click(await screen.findByRole("button", { name: "继续" }));
+    await user.type(screen.getByLabelText("管理员邮箱"), "admin@kekeio.com");
+    await user.type(screen.getByLabelText("显示名"), "管理员");
+    await user.type(screen.getByLabelText("密码"), "correct horse battery staple");
+    await user.type(screen.getByLabelText("再次输入密码"), "correct horse battery staple");
+    await user.click(screen.getByRole("button", { name: "继续" }));
+    await user.click(screen.getByRole("button", { name: "继续" }));
+    await user.click(screen.getByRole("checkbox", { name: /开放插件注册/ }));
+
+    expect(screen.getByLabelText("邮箱服务商")).toHaveValue("cloudflare");
+    expect(screen.getByLabelText("SMTP 主机")).toHaveValue("smtp.mx.cloudflare.net");
+    expect(screen.getByLabelText("用户名")).toHaveValue("api_token");
+    expect(screen.getByLabelText("Cloudflare API Token")).toHaveValue("");
+    expect(screen.getByText(/Email Sending: Edit/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "创建 Cloudflare API Token" })).toHaveAttribute(
+      "href",
+      "https://dash.cloudflare.com/profile/api-tokens/"
+    );
+
+    await user.selectOptions(screen.getByLabelText("邮箱服务商"), "qq");
+    expect(screen.queryByRole("link", { name: "创建 Cloudflare API Token" })).not.toBeInTheDocument();
   });
 
   it("upgrades an old blank public URL draft to the default", async () => {
@@ -82,6 +130,14 @@ describe("InstallWizard", () => {
     await waitFor(() => {
       const progress = JSON.parse(window.sessionStorage.getItem("fullpro:install:draft") || "{}");
       expect(progress.draft?.publicBaseUrl).toBe("https://tab.kekeio.com");
+      expect(progress.draft).toMatchObject({
+        smtpProvider: "cloudflare",
+        smtpHost: "smtp.mx.cloudflare.net",
+        smtpPort: "465",
+        smtpTls: "tls",
+        smtpFrom: "noreply@kekeio.com",
+        smtpUser: "api_token"
+      });
     });
   });
 

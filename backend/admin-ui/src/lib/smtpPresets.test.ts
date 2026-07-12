@@ -4,6 +4,7 @@ import { detectSMTPProvider, getSMTPPreset, smtpProviderOptions } from "./smtpPr
 describe("SMTP provider presets", () => {
   it("publishes the supported providers in the intended order", () => {
     expect(smtpProviderOptions.map(({ id, label }) => ({ id, label }))).toEqual([
+      { id: "cloudflare", label: "Cloudflare Email Sending" },
       { id: "qq", label: "QQ 邮箱" },
       { id: "netease163", label: "网易 163 邮箱" },
       { id: "gmail", label: "Google Gmail" },
@@ -12,6 +13,7 @@ describe("SMTP provider presets", () => {
   });
 
   it.each([
+    ["cloudflare", "smtp.mx.cloudflare.net", "465", "tls"],
     ["qq", "smtp.qq.com", "465", "tls"],
     ["netease163", "smtp.163.com", "465", "tls"],
     ["gmail", "smtp.gmail.com", "587", "starttls"]
@@ -23,5 +25,17 @@ describe("SMTP provider presets", () => {
   it("treats partially matching or unknown settings as custom", () => {
     expect(detectSMTPProvider({ host: "smtp.gmail.com", port: 465, tls: "tls" })).toBe("custom");
     expect(detectSMTPProvider({ host: "smtp.example.com", port: 587, tls: "starttls" })).toBe("custom");
+  });
+
+  it("describes the Cloudflare API Token credential without embedding a secret", () => {
+    expect(getSMTPPreset("cloudflare")).toMatchObject({
+      username: "api_token",
+      defaultFrom: "noreply@kekeio.com",
+      passwordLabel: "Cloudflare API Token",
+      credentialUrl: "https://dash.cloudflare.com/profile/api-tokens/",
+      credentialLinkLabel: "创建 Cloudflare API Token"
+    });
+    expect(getSMTPPreset("cloudflare").credentialHelp).toContain("Email Sending: Edit");
+    expect(getSMTPPreset("cloudflare")).not.toHaveProperty("password");
   });
 });
