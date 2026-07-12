@@ -23,12 +23,12 @@ WORKDIR /app
 COPY --from=build /out/fullpro-server /usr/local/bin/fullpro-server
 RUN mkdir -p /data /backups && chown -R fullpro:fullpro /data /backups
 USER fullpro
-ENV FULLPRO_ADDR=:8881
+ENV FULLPRO_ADDR=:9009
 ENV FULLPRO_DB=/data/fullpro.db
 ENV FULLPRO_BACKUP_DIRECTORY=/backups
 ENV FULLPRO_COOKIE_SECURE=true
-ENV FULLPRO_HEALTHCHECK_URL=http://127.0.0.1:8881/health/live
-EXPOSE 8881
+ENV FULLPRO_HEALTHCHECK_URL=http://127.0.0.1:9009/health/live
+EXPOSE 9009
 VOLUME ["/data", "/backups"]
 STOPSIGNAL SIGTERM
 HEALTHCHECK --interval=30s --timeout=3s --start-period=30s --retries=3 \

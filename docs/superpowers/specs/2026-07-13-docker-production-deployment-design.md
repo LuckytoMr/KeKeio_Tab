@@ -2,7 +2,7 @@
 
 ## 目标与边界
 
-- 后端生产监听端口统一为 `8881`，公网地址保持 `https://tab.kekeio.com`。
+- 后端生产监听端口统一为 `9009`，公网地址保持 `https://tab.kekeio.com`。
 - Docker 是后端唯一正式部署方式；本地 `dev` 模式不参与本次生产验收。
 - 路由器只把公网标准端口送到 HTTPS 反向代理，Go 后端端口不直接暴露到公网。
 - GitHub Actions 和镜像构建统一使用 Node.js 24 LTS，并升级所有 JavaScript Action 到声明 Node.js 24 运行时的版本。
@@ -12,7 +12,7 @@
 
 ### 采用：Docker Compose + Caddy
 
-Compose 同时运行 `backend` 和 `caddy`。后端只在 Docker 网络的 `8881` 提供 HTTP；Caddy 负责证书、HTTPS、请求路径白名单和转发头。为避开路由器管理页面占用宿主机 `80/443`，Caddy 默认发布到宿主机 `8080/8443`，再由路由器执行：
+Compose 同时运行 `backend` 和 `caddy`。后端只在 Docker 网络的 `9009` 提供 HTTP；Caddy 负责证书、HTTPS、请求路径白名单和转发头。为避开路由器管理页面占用宿主机 `80/443`，Caddy 默认发布到宿主机 `8080/8443`，再由路由器执行：
 
 - 公网 TCP `80` → Docker 主机 TCP `8080`
 - 公网 TCP `443` → Docker 主机 TCP `8443`
@@ -22,9 +22,9 @@ Compose 同时运行 `backend` 和 `caddy`。后端只在 Docker 网络的 `8881
 
 ### 兼容：已有反向代理
 
-如果路由器已有 Caddy、Nginx 或 Nginx Proxy Manager，可只运行后端。容器代理加入同一网络后使用 `backend:8881`；只有显式叠加 `compose.host-proxy.yaml` 时，宿主机代理才能使用 `127.0.0.1:8881`。代理必须覆盖客户端伪造的转发头并传递可信的 `X-Forwarded-For` 和 `X-Forwarded-Proto`。
+如果路由器已有 Caddy、Nginx 或 Nginx Proxy Manager，可只运行后端。容器代理加入同一网络后使用 `backend:9009`；只有显式叠加 `compose.host-proxy.yaml` 时，宿主机代理才能使用 `127.0.0.1:9009`。代理必须覆盖客户端伪造的转发头并传递可信的 `X-Forwarded-For` 和 `X-Forwarded-Proto`。
 
-### 不采用：公网 80 直接转发到 8881
+### 不采用：公网 80 直接转发到 9009
 
 该方式只能提供纯 HTTP，无法满足正式扩展固定 HTTPS、安全 Cookie、账号验证/重置链接和证书要求，因此不作为受支持的生产部署。
 
@@ -40,13 +40,13 @@ Compose 同时运行 `backend` 和 `caddy`。后端只在 Docker 网络的 `8881
    - `/account/assets/*`
    - `/health/live` 与 `/health/ready`
 4. 公网根路径转发到后端 liveness，允许的管理网段访问根路径时跳转到 `/admin`；`/admin*`、`/install*` 和 `/api/admin/*` 只允许来自 `.env` 明确填写的最小 LAN/VLAN 前缀，其余请求返回 404。
-5. Caddy 通过固定 Docker 网络地址连接 `backend:8881`；后端只信任该代理地址提供的转发头。
+5. Caddy 通过固定 Docker 网络地址连接 `backend:9009`；后端只信任该代理地址提供的转发头。
 6. SQLite 数据与备份使用两个独立宿主目录，防止逻辑误操作相互覆盖；同一磁盘上的目录不提供物理灾备，正式灾备需要第二介质或离机复制。
 
 ## 端口与安全约束
 
-- 容器内部后端端口：`8881`。
-- 后端宿主端口：默认完全不发布；只有显式启用宿主机代理 override 时才绑定 `127.0.0.1:8881`，且不得配置公网端口转发。
+- 容器内部后端端口：`9009`。
+- 后端宿主端口：默认完全不发布；只有显式启用宿主机代理 override 时才绑定 `127.0.0.1:9009`，且不得配置公网端口转发。
 - Caddy 宿主机端口：默认 `8080/8443`，可用环境文件调整。
 - 公网端口：只开放 TCP `80/443`；UDP `443` 可选。
 - 如果发布 AAAA 记录，IPv6 路径必须也能在标准 `443` 到达 Caddy。无法做到时不发布 AAAA，避免部分客户端优先 IPv6 后失败。
@@ -73,7 +73,7 @@ Compose 同时运行 `backend` 和 `caddy`。后端只在 Docker 网络的 `8881
 
 - Caddy 对未列入白名单的公网路径统一返回 404，避免错误暴露安装和管理页面。
 - 数据目录不可写时后端应启动失败；部署文档在启动前给出目录权限命令。
-- `FULLPRO_ADDR` 与 `FULLPRO_HEALTHCHECK_URL` 都在镜像中固定到 `8881`，避免单独覆盖导致漂移。
+- `FULLPRO_ADDR` 与 `FULLPRO_HEALTHCHECK_URL` 都在镜像中固定到 `9009`，避免单独覆盖导致漂移。
 - 生产部署使用已发布的 `v*`、`sha-<完整提交SHA>` 标签或镜像 digest；升级前记录当前 digest 并创建完整备份。
 - 默认只支持 Cloudflare“仅 DNS”；橙云需要单独维护 Cloudflare 可信代理并为 LAN 提供绕过代理的 split DNS。
 - 路由器不支持 NAT loopback 时，可用 split DNS，但域名所指目标仍必须在标准 `80/443` 接收请求或继续执行到 `8080/8443` 的 LAN 侧 DNAT。

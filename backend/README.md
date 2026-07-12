@@ -4,7 +4,7 @@ KeKeIO Tab 的单机自托管后端，提供邮箱验证账号、`SharedProfile 
 
 ## Docker 正式部署
 
-正式后端统一监听容器端口 `8881`，并由 HTTPS 反向代理提供 `https://tab.kekeio.com`。仓库提供可直接运行的路由器部署包：
+正式后端统一监听容器端口 `9009`，并由 HTTPS 反向代理提供 `https://tab.kekeio.com`。仓库提供可直接运行的路由器部署包：
 
 - [完整路由器部署指南](deploy/router/README.md)
 - [Docker Compose](deploy/router/compose.yaml)
@@ -33,10 +33,10 @@ docker load -i kekeio-tab-docker-arm64.tar
 默认链路为：
 
 ```text
-https://tab.kekeio.com:443 -> WAN 443 -> host 8443 -> Caddy 443 -> backend:8881
+https://tab.kekeio.com:443 -> WAN 443 -> host 8443 -> Caddy 443 -> backend:9009
 ```
 
-公网域名没有端口后缀。DNS 只解析 IP；外部 `80/443` 到内部 `8080/8443` 的转换由路由器 NAT 完成，Caddy 再把 HTTP 请求转到 `backend:8881`。不要把 WAN `8881` 直接映射给 Go 后端。
+公网域名没有端口后缀。DNS 只解析 IP；外部 `80/443` 到内部 `8080/8443` 的转换由路由器 NAT 完成，Caddy 再把 HTTP 请求转到 `backend:9009`。不要把 WAN `9009` 直接映射给 Go 后端。
 
 镜像以 UID/GID `10001` 非 root 用户运行。使用宿主机目录前必须预创建 `/data` 与 `/backups` 对应路径并 `chown 10001:10001`；优先使用 ext4 等支持 SQLite 锁、WAL、原子 rename 和 Unix 权限的本地文件系统。Docker 启动时会验证 `/backups` 可写并执行 `fsync`，失败直接退出。同一磁盘上的两个目录只提供逻辑隔离；灾备仍需第二介质或离机复制。
 
@@ -54,7 +54,7 @@ docker compose --env-file .env -f compose.yaml logs backend
 https://tab.kekeio.com/install
 ```
 
-安装向导会完成环境检查、独立管理员创建、公网 API、精确扩展来源、SMTP、配额及保留策略配置。公网 URL 填 `https://tab.kekeio.com`，不要追加 `:8881` 或 `:8443`；备份目录填 `/backups`。系统没有默认管理员账号或固定生产密码，安装完成后一次性安装码会失效并删除。
+安装向导会完成环境检查、独立管理员创建、公网 API、精确扩展来源、SMTP、配额及保留策略配置。公网 URL 填 `https://tab.kekeio.com`，不要追加 `:9009` 或 `:8443`；备份目录填 `/backups`。系统没有默认管理员账号或固定生产密码，安装完成后一次性安装码会失效并删除。
 
 后台入口是 `https://tab.kekeio.com/admin`。Caddy 只允许 `.env` 中配置的精确 LAN/VLAN 来源访问 `/admin*`、`/install*` 和 `/api/admin/*`；后端还会再次执行管理员 CIDR 与 HTTPS 校验。部署后必须从真正的外网确认这些路径返回 404，任一验证失败都必须停止上线。若路由器把 WAN 来源 SNAT 成允许的 LAN 地址，应改用路由器防火墙、仅 LAN/VPN 管理入口，不能只依赖 Caddy matcher。
 
@@ -83,12 +83,12 @@ https://tab.kekeio.com/install
 
 `/account/assets/*` 是邮箱验证与密码重置页面所需的 CSS/JS，遗漏会让账号流程失效。未匹配路径统一返回 404。
 
-默认 Compose 不发布后端宿主端口。现有代理在另一个容器中时应加入同一 Docker 网络并使用 `backend:8881`；宿主机代理必须显式叠加 `compose.host-proxy.yaml` 才能使用 `127.0.0.1:8881`。只有直接对端位于 `FULLPRO_TRUSTED_PROXIES` 时后端才读取 `X-Forwarded-For`/`X-Forwarded-Proto`，因此 `KEKEIO_TRUSTED_PROXIES` 必须收窄到代理容器 IP 或实际 bridge gateway `/32`，不能照抄任意私网段。完整命令与旧版 Docker 的 localhost 发布风险见路由器部署指南。
+默认 Compose 不发布后端宿主端口。现有代理在另一个容器中时应加入同一 Docker 网络并使用 `backend:9009`；宿主机代理必须显式叠加 `compose.host-proxy.yaml` 才能使用 `127.0.0.1:9009`。只有直接对端位于 `FULLPRO_TRUSTED_PROXIES` 时后端才读取 `X-Forwarded-For`/`X-Forwarded-Proto`，因此 `KEKEIO_TRUSTED_PROXIES` 必须收窄到代理容器 IP 或实际 bridge gateway `/32`，不能照抄任意私网段。完整命令与旧版 Docker 的 localhost 发布风险见路由器部署指南。
 
 ## 生产环境变量
 
 ```text
-FULLPRO_ADDR=:8881
+FULLPRO_ADDR=:9009
 FULLPRO_DB=/data/fullpro.db
 FULLPRO_BACKUP_DIRECTORY=/backups
 FULLPRO_SECRETS_FILE=/data/secrets.json
@@ -103,7 +103,7 @@ FULLPRO_TRUSTED_PROXIES=<Caddy容器IP>/32
 FULLPRO_AUTH_RATE_LIMIT=20
 FULLPRO_AUTH_RATE_WINDOW_SECONDS=60
 FULLPRO_PASSWORD_HASH_CONCURRENCY=2
-FULLPRO_HEALTHCHECK_URL=http://127.0.0.1:8881/health/live
+FULLPRO_HEALTHCHECK_URL=http://127.0.0.1:9009/health/live
 ```
 
 `FULLPRO_BACKUP_DIRECTORY` 是启动时强制覆盖项，优先级高于安装向导保存的备份目录；后端会在开始监听前验证该目录可写并执行 `fsync`。Docker 正式部署应保持为 `/backups`，不要再通过向导改到容器外不可见的宿主路径。

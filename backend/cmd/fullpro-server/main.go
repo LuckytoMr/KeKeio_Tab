@@ -35,7 +35,7 @@ func main() {
 		}
 		return
 	}
-	addr := env("FULLPRO_ADDR", ":8881")
+	addr := env("FULLPRO_ADDR", ":9009")
 	dbPath := env("FULLPRO_DB", "data/fullpro.db")
 	dataDir := filepath.Dir(dbPath)
 	secretsPath := env("FULLPRO_SECRETS_FILE", filepath.Join(dataDir, "secrets.json"))

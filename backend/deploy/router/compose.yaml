@@ -7,16 +7,16 @@ services:
     restart: unless-stopped
     stop_grace_period: 30s
     environment:
-      FULLPRO_ADDR: ":8881"
+      FULLPRO_ADDR: ":9009"
       FULLPRO_DB: "/data/fullpro.db"
       FULLPRO_BACKUP_DIRECTORY: "/backups"
       FULLPRO_COOKIE_SECURE: "true"
       FULLPRO_PUBLIC_BASE_URL: "https://${KEKEIO_DOMAIN:?Set KEKEIO_DOMAIN in the deployment .env file}"
-      FULLPRO_HEALTHCHECK_URL: "http://127.0.0.1:8881/health/live"
+      FULLPRO_HEALTHCHECK_URL: "http://127.0.0.1:9009/health/live"
       FULLPRO_ADMIN_ALLOWED_CIDRS: "${KEKEIO_ADMIN_ALLOWED_CIDRS:?Set the exact administrator CIDRs in the deployment .env file}"
       FULLPRO_TRUSTED_PROXIES: "${KEKEIO_TRUSTED_PROXIES:?Set the exact Caddy container IP or CIDR in the deployment .env file}"
     expose:
-      - "8881"
+      - "9009"
     volumes:
       - type: bind
         source: "${KEKEIO_DATA_DIR:?Set KEKEIO_DATA_DIR in the deployment .env file}"

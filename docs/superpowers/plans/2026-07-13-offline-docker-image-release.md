@@ -14,7 +14,7 @@
 - The offline artifact filename is exactly `kekeio-tab-docker-arm64.tar`.
 - The image loaded from the archive is exactly `kekeio-tab:arm64`.
 - The target platform is exactly `linux/arm64`; ARMv7 and MIPS remain unsupported.
-- Production backend port remains exactly `8881`.
+- Production backend port remains exactly `9009`.
 - Preserve the non-root UID/GID `10001`, `/data`, `/backups`, secure-cookie default, and existing health check from `backend/Dockerfile`.
 - Do not run local application tests or local Docker builds; application build, `docker load`, platform inspection, and liveness verification run in GitHub Actions.
 - Preserve user-owned untracked paths `.codegraph/` and `docker命令.txt`.
@@ -91,11 +91,11 @@ Insert these steps after `Build Windows and Linux ARM64 server binaries` and bef
           docker run -d \
             --name "${container_name}" \
             --platform linux/arm64 \
-            -p 127.0.0.1:18881:8881 \
+            -p 127.0.0.1:9009:9009 \
             kekeio-tab:arm64
 
           for attempt in $(seq 1 30); do
-            if curl --fail --silent --show-error http://127.0.0.1:18881/health/live >/dev/null; then
+            if curl --fail --silent --show-error http://127.0.0.1:9009/health/live >/dev/null; then
               exit 0
             fi
             sleep 2
@@ -149,7 +149,7 @@ $required = @(
   'outputs: type=docker',
   'docker load -i',
   'linux/arm64',
-  '127.0.0.1:18881:8881',
+  '127.0.0.1:9009:9009',
   'release/*.tar'
 )
 foreach ($value in $required) {
@@ -182,7 +182,7 @@ Expected: commit contains only the workflow and checked plan progress.
 - Modify: `docs/superpowers/plans/2026-07-13-offline-docker-image-release.md`
 
 **Interfaces:**
-- Consumes: `kekeio-tab-docker-arm64.tar`, `kekeio-tab:arm64`, backend UID `10001`, port `8881`, `/data`, and `/backups` from Task 1 and `backend/Dockerfile`.
+- Consumes: `kekeio-tab-docker-arm64.tar`, `kekeio-tab:arm64`, backend UID `10001`, port `9009`, `/data`, and `/backups` from Task 1 and `backend/Dockerfile`.
 - Produces: one consistent operator procedure for Actions download → `docker load` → `docker run`.
 
 - [x] **Step 1: Run a documentation assertion that demonstrates the new operator path is absent**
@@ -253,7 +253,7 @@ docker rm -f kekeio-tab 2>/dev/null || true
 docker run -d \
   --name kekeio-tab \
   --restart unless-stopped \
-  -p 8881:8881 \
+  -p 9009:9009 \
   -e FULLPRO_ADMIN_ALLOWED_CIDRS=192.168.50.0/24 \
   -v /mnt/usb-24aeefbb/mi_docker/tab/data:/data \
   -v /mnt/usb-24aeefbb/mi_docker/tab/backups:/backups \
@@ -267,7 +267,7 @@ docker ps
 docker logs --tail 100 kekeio-tab
 ```
 
-`8881` 是后端 HTTP 上游端口。安装页、后台和正式扩展仍要求可信 HTTPS 入口；不要把 WAN `8881` 直接暴露到公网。需要无端口域名访问时，继续使用下文的 Caddy/Compose 或等价反向代理配置。
+`9009` 是后端 HTTP 上游端口。安装页、后台和正式扩展仍要求可信 HTTPS 入口；不要把 WAN `9009` 直接暴露到公网。需要无端口域名访问时，继续使用下文的 Caddy/Compose 或等价反向代理配置。
 ````
 
 Rename the existing `## 2. 登录 GHCR 并启动` heading to `## 3. 私有 GHCR 与完整 Compose 部署`, then increment the following numbered headings by one so the final sequence is 1 through 7.
@@ -285,7 +285,7 @@ foreach ($file in $files) {
   }
 }
 $router = Get-Content -Raw 'backend/deploy/router/README.md'
-foreach ($required in @('kekeio-tab:arm64', 'FULLPRO_ADMIN_ALLOWED_CIDRS=192.168.50.0/24', '不要把 WAN `8881` 直接暴露到公网')) {
+foreach ($required in @('kekeio-tab:arm64', 'FULLPRO_ADMIN_ALLOWED_CIDRS=192.168.50.0/24', '不要把 WAN `9009` 直接暴露到公网')) {
   if (-not $router.Contains($required)) { throw "Router guide is missing $required" }
 }
 git diff --check
@@ -406,7 +406,7 @@ docker rm -f kekeio-tab 2>/dev/null || true
 docker run -d \
   --name kekeio-tab \
   --restart unless-stopped \
-  -p 8881:8881 \
+  -p 9009:9009 \
   -e FULLPRO_ADMIN_ALLOWED_CIDRS=192.168.50.0/24 \
   -v /mnt/usb-24aeefbb/mi_docker/tab/data:/data \
   -v /mnt/usb-24aeefbb/mi_docker/tab/backups:/backups \

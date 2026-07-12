@@ -2,17 +2,17 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make the backend directly deployable on an amd64/arm64 router with Docker, use internal port `8881`, serve `https://tab.kekeio.com` without a visible port, and remove all Node.js 20 GitHub Actions warnings.
+**Goal:** Make the backend directly deployable on an amd64/arm64 router with Docker, use internal port `9009`, serve `https://tab.kekeio.com` without a visible port, and remove all Node.js 20 GitHub Actions warnings.
 
-**Architecture:** A non-root Go backend listens on `:8881` in a private, fixed-address Docker network. Caddy terminates public TLS on container ports `80/443`, filters public and private-management paths, and proxies to `backend:8881`; router DNAT may map WAN `80/443` to high host ports `8080/8443` without changing the client URL.
+**Architecture:** A non-root Go backend listens on `:9009` in a private, fixed-address Docker network. Caddy terminates public TLS on container ports `80/443`, filters public and private-management paths, and proxies to `backend:9009`; router DNAT may map WAN `80/443` to high host ports `8080/8443` without changing the client URL.
 
 **Tech Stack:** Docker Compose, Caddy 2, Go 1.25, SQLite, Node.js 24 LTS, pnpm 11.6.0, GitHub Actions, GHCR.
 
 ## Global Constraints
 
-- Production backend port is exactly `8881`; public URL remains exactly `https://tab.kekeio.com`.
+- Production backend port is exactly `9009`; public URL remains exactly `https://tab.kekeio.com`.
 - Docker is the only supported production backend deployment target.
-- Do not expose backend port `8881` through WAN forwarding.
+- Do not expose backend port `9009` through WAN forwarding.
 - Do not run local application, unit, integration, or container tests in this task; perform static/configuration checks only.
 - Keep the extension ZIP and tagged GitHub Release flow.
 - Do not modify generated admin UI assets by hand.
@@ -20,7 +20,7 @@
 
 ---
 
-### Task 1: Align the production runtime and image with port 8881 and Node.js 24
+### Task 1: Align the production runtime and image with port 9009 and Node.js 24
 
 **Files:**
 - Modify: `backend/cmd/fullpro-server/main.go:38`
@@ -34,12 +34,12 @@
 - Modify: `backend/.dockerignore`
 
 **Interfaces:**
-- Produces: backend HTTP service at container port `8881`; liveness URL `http://127.0.0.1:8881/health/live`; writable mount points `/data` and `/backups` owned by UID/GID `10001` in the image; fail-fast backup directory override.
+- Produces: backend HTTP service at container port `9009`; liveness URL `http://127.0.0.1:9009/health/live`; writable mount points `/data` and `/backups` owned by UID/GID `10001` in the image; fail-fast backup directory override.
 
 - [ ] **Step 1: Change only the production default listener**
 
 ```go
-addr := env("FULLPRO_ADDR", ":8881")
+addr := env("FULLPRO_ADDR", ":9009")
 ```
 
 Keep the explicitly isolated local `dev` listener at `127.0.0.1:8787`.
@@ -50,7 +50,7 @@ Read `FULLPRO_BACKUP_DIRECTORY` before serving, require an absolute path, create
 
 - [ ] **Step 2: Update the Docker build and runtime contract**
 
-Use `node:24-alpine`, create and own both persistent directories, set secure production defaults, expose `8881`, and make the image health check a liveness check:
+Use `node:24-alpine`, create and own both persistent directories, set secure production defaults, expose `9009`, and make the image health check a liveness check:
 
 ```dockerfile
 FROM --platform=$BUILDPLATFORM node:24-alpine AS admin-ui-build
@@ -62,12 +62,12 @@ WORKDIR /app
 COPY --from=build /out/fullpro-server /usr/local/bin/fullpro-server
 RUN mkdir -p /data /backups && chown -R fullpro:fullpro /data /backups
 USER fullpro
-ENV FULLPRO_ADDR=:8881
+ENV FULLPRO_ADDR=:9009
 ENV FULLPRO_DB=/data/fullpro.db
 ENV FULLPRO_BACKUP_DIRECTORY=/backups
 ENV FULLPRO_COOKIE_SECURE=true
-ENV FULLPRO_HEALTHCHECK_URL=http://127.0.0.1:8881/health/live
-EXPOSE 8881
+ENV FULLPRO_HEALTHCHECK_URL=http://127.0.0.1:9009/health/live
+EXPOSE 9009
 VOLUME ["/data", "/backups"]
 STOPSIGNAL SIGTERM
 HEALTHCHECK --interval=30s --timeout=3s --start-period=30s --retries=3 \
@@ -77,7 +77,7 @@ CMD ["fullpro-server"]
 
 - [ ] **Step 3: Make the environment example production-safe**
 
-Set `FULLPRO_ADDR=:8881` and `FULLPRO_HEALTHCHECK_URL=http://127.0.0.1:8881/health/live`. Remove active localhost values for both origin override variables; leave one commented example explaining that `FULLPRO_API_ALLOWED_ORIGINS` overrides installation settings.
+Set `FULLPRO_ADDR=:9009` and `FULLPRO_HEALTHCHECK_URL=http://127.0.0.1:9009/health/live`. Remove active localhost values for both origin override variables; leave one commented example explaining that `FULLPRO_API_ALLOWED_ORIGINS` overrides installation settings.
 
 - [ ] **Step 4: Exclude deployment documentation from the Docker build context**
 
@@ -91,7 +91,7 @@ Run:
 rg -n "FULLPRO_ADDR|FULLPRO_HEALTHCHECK_URL|EXPOSE|FROM node:" backend/Dockerfile backend/.env.example backend/cmd/fullpro-server/main.go
 ```
 
-Expected: production defaults and image references use `8881` and Node.js 24; only the explicitly local `dev` code still uses `8787`.
+Expected: production defaults and image references use `9009` and Node.js 24; only the explicitly local `dev` code still uses `8787`.
 
 ---
 
@@ -105,12 +105,12 @@ Expected: production defaults and image references use `8881` and Node.js 24; on
 - Create: `backend/deploy/router/README.md`
 
 **Interfaces:**
-- Consumes: backend port `8881`, `/health/live`, `/health/ready`, UID/GID `10001`.
+- Consumes: backend port `9009`, `/health/live`, `/health/ready`, UID/GID `10001`.
 - Produces: services `backend` and `caddy`; Docker network `kekeio-tab-edge`; configurable Caddy host ports `8080/8443`; public domain environment variable `KEKEIO_DOMAIN`; optional loopback backend port override for a host proxy.
 
 - [ ] **Step 1: Create the Compose topology**
 
-The backend must use a required immutable GHCR tag/digest, fixed network addresses, pre-created data/backup bind mounts, log rotation, no host port by default, required exact `FULLPRO_TRUSTED_PROXIES`, and no CORS environment override. Caddy must wait for liveness, map high host ports to container `80/443`, persist certificate state, and receive required exact management networks. A separate override may bind backend only to `127.0.0.1:8881` for a host proxy.
+The backend must use a required immutable GHCR tag/digest, fixed network addresses, pre-created data/backup bind mounts, log rotation, no host port by default, required exact `FULLPRO_TRUSTED_PROXIES`, and no CORS environment override. Caddy must wait for liveness, map high host ports to container `80/443`, persist certificate state, and receive required exact management networks. A separate override may bind backend only to `127.0.0.1:9009` for a host proxy.
 
 - [ ] **Step 2: Create the Caddy route policy**
 
@@ -132,11 +132,11 @@ Use this route contract:
 
   route {
     redir @management_root /admin 302
-    reverse_proxy @public_root backend:8881 {
+    reverse_proxy @public_root backend:9009 {
       rewrite /health/live
     }
-    reverse_proxy @management backend:8881
-    reverse_proxy @public backend:8881
+    reverse_proxy @management backend:9009
+    reverse_proxy @public backend:9009
     respond 404
   }
 }
@@ -237,12 +237,12 @@ Expected: no `@v4` artifact Action, no Docker Action v3/old SHA, and no project 
 Move local development behind a clearly non-production note, link the runnable router deployment, and show the external/internal port chain:
 
 ```text
-https://tab.kekeio.com:443 -> router WAN 443 -> host 8443 -> Caddy 443 -> backend:8881
+https://tab.kekeio.com:443 -> router WAN 443 -> host 8443 -> Caddy 443 -> backend:9009
 ```
 
 - [ ] **Step 2: Update production port references**
 
-Replace production install, admin, environment, Docker mapping, Caddy upstream, and SSH/upstream examples from `8787` to `8881`; retain only clearly labelled local-dev and historical test examples at `8787`.
+Replace production install, admin, environment, Docker mapping, Caddy upstream, and SSH/upstream examples from `8787` to `9009`; retain only clearly labelled local-dev and historical test examples at `8787`.
 
 - [ ] **Step 3: Correct public account routes and health semantics**
 
@@ -250,7 +250,7 @@ Add `/account/assets/*` to every proxy whitelist. Explain that Docker checks `/h
 
 - [ ] **Step 4: Add router operational warnings**
 
-Document that DNS does not forward ports, `EXPOSE` does not publish ports, WAN `80/443` may map to high internal ports, IPv6 needs a real standard-port path, and backend `8881` must never be WAN-forwarded.
+Document that DNS does not forward ports, `EXPOSE` does not publish ports, WAN `80/443` may map to high internal ports, IPv6 needs a real standard-port path, and backend `9009` must never be WAN-forwarded.
 
 ---
 
@@ -281,7 +281,7 @@ Expected: no whitespace errors; `.codegraph/` remains outside the patch.
 
 - [ ] **Step 3: Review the final diff manually**
 
-Confirm the four port layers are consistent: Go `:8881`, image `EXPOSE 8881`, Compose `backend:8881`, and router WAN `80/443` to Caddy only. Confirm the public extension URL remains `https://tab.kekeio.com`.
+Confirm the four port layers are consistent: Go `:9009`, image `EXPOSE 9009`, Compose `backend:9009`, and router WAN `80/443` to Caddy only. Confirm the public extension URL remains `https://tab.kekeio.com`.
 
 - [ ] **Step 4: Do not commit or push without an explicit user request**
 

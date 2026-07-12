@@ -14,11 +14,11 @@
 
 	route {
 		redir @management_root /admin 302
-		reverse_proxy @public_root backend:8881 {
+		reverse_proxy @public_root backend:9009 {
 			rewrite /health/live
 		}
-		reverse_proxy @management backend:8881
-		reverse_proxy @public backend:8881
+		reverse_proxy @management backend:9009
+		reverse_proxy @public backend:9009
 		respond 404
 	}
 }

@@ -7,10 +7,10 @@ https://tab.kekeio.com:443
   -> 路由器公网 TCP 443
   -> Docker 主机 TCP 8443
   -> Caddy 容器 TCP 443
-  -> backend 容器 TCP 8881
+  -> backend 容器 TCP 9009
 ```
 
-客户端始终访问 `https://tab.kekeio.com`，不会看到 `8443` 或 `8881`。外网访问根地址会返回后端 liveness 状态，允许的局域网来源会跳转到后台。`8881` 只属于后端和反向代理之间的上游链路，不得设置 WAN 端口转发。
+客户端始终访问 `https://tab.kekeio.com`，不会看到 `8443` 或 `9009`。外网访问根地址会返回后端 liveness 状态，允许的局域网来源会跳转到后台。`9009` 只属于后端和反向代理之间的上游链路，不得设置 WAN 端口转发。
 
 ## 前置条件
 
@@ -54,7 +54,7 @@ docker rm -f kekeio-tab 2>/dev/null || true
 docker run -d \
   --name kekeio-tab \
   --restart unless-stopped \
-  -p 8881:8881 \
+  -p 9009:9009 \
   -e FULLPRO_ADMIN_ALLOWED_CIDRS=192.168.50.0/24 \
   -v /mnt/usb-24aeefbb/mi_docker/tab/data:/data \
   -v /mnt/usb-24aeefbb/mi_docker/tab/backups:/backups \
@@ -68,7 +68,7 @@ docker ps
 docker logs --tail 100 kekeio-tab
 ```
 
-`8881` 是后端 HTTP 上游端口。安装页、后台和正式扩展仍要求可信 HTTPS 入口；不要把 WAN `8881` 直接暴露到公网。需要无端口域名访问时，继续使用下文的 Caddy/Compose 或等价反向代理配置。
+`9009` 是后端 HTTP 上游端口。安装页、后台和正式扩展仍要求可信 HTTPS 入口；不要把 WAN `9009` 直接暴露到公网。需要无端口域名访问时，继续使用下文的 Caddy/Compose 或等价反向代理配置。
 
 ## 3. 私有 GHCR 与完整 Compose 部署
 
@@ -119,7 +119,7 @@ https://tab.kekeio.com/install
 
 安装向导中：
 
-- 公网 URL 填 `https://tab.kekeio.com`，不要追加 `:8881`、`:8443`。
+- 公网 URL 填 `https://tab.kekeio.com`，不要追加 `:9009`、`:8443`。
 - 允许来源填精确的 `chrome-extension://<扩展ID>`。
 - 自动备份目录填 `/backups`，让备份与 `/data` 分离。
 
@@ -143,13 +143,13 @@ https://tab.kekeio.com/api/admin/v1/overview
 docker compose --env-file .env -f compose.yaml up -d backend
 ```
 
-容器代理上游使用 `backend:8881`。若必须使用宿主机代理，先用 `docker network inspect kekeio-tab-edge` 确认实际 bridge gateway，把 `KEKEIO_TRUSTED_PROXIES` 改成该 gateway 的精确 `/32`，再显式启用端口 override：
+容器代理上游使用 `backend:9009`。若必须使用宿主机代理，先用 `docker network inspect kekeio-tab-edge` 确认实际 bridge gateway，把 `KEKEIO_TRUSTED_PROXIES` 改成该 gateway 的精确 `/32`，再显式启用端口 override：
 
 ```sh
 docker compose --env-file .env -f compose.yaml -f compose.host-proxy.yaml up -d backend
 ```
 
-宿主机代理上游使用 `127.0.0.1:8881`。Docker Engine 低于 28 时，同一二层网络的其他主机可能访问仅绑定 localhost 的发布端口；旧引擎不要使用这个 override，应改用同网络容器代理或额外防火墙隔离。代理必须清除客户端伪造的转发头，再设置可信的 `X-Forwarded-For`、`X-Forwarded-Proto`，并复制本目录 Caddyfile 的公网路径白名单（包括 `/account/assets/*`）。
+宿主机代理上游使用 `127.0.0.1:9009`。Docker Engine 低于 28 时，同一二层网络的其他主机可能访问仅绑定 localhost 的发布端口；旧引擎不要使用这个 override，应改用同网络容器代理或额外防火墙隔离。代理必须清除客户端伪造的转发头，再设置可信的 `X-Forwarded-For`、`X-Forwarded-Proto`，并复制本目录 Caddyfile 的公网路径白名单（包括 `/account/assets/*`）。
 
 ## 7. 升级、回滚与备份
 

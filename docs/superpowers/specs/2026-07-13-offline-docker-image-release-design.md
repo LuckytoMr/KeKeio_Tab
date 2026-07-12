@@ -7,7 +7,7 @@ GitHub Actions 在每次有效发布构建中生成一个已经完成应用编�
 ## 非目标
 
 - 不公开现有 GHCR 包；多架构 GHCR 发布继续保持私有。
-- 不改变后端生产监听端口 `8881`、持久化目录或安全边界。
+- 不改变后端生产监听端口 `9009`、持久化目录或安全边界。
 - 不用 OCI 专用归档替代 Docker `save` 格式，以免旧版路由器 Docker 无法直接加载。
 - 不移除现有 Windows、Linux ARM64 二进制包或浏览器扩展包。
 
@@ -49,7 +49,7 @@ kekeio-tab:arm64
 
 - `docker load -i release/kekeio-tab-docker-arm64.tar` 成功。
 - `docker image inspect kekeio-tab:arm64` 返回 Linux ARM64。
-- 容器以镜像默认入口启动，并在超时前通过 `http://127.0.0.1:18881/health/live`。
+- 容器以镜像默认入口启动，并在超时前通过 `http://127.0.0.1:9009/health/live`。
 - tar 文件存在且非空，artifact 上传缺失时直接失败。
 
 ## 路由器部署
@@ -71,7 +71,7 @@ chown -R 10001:10001 /mnt/usb-24aeefbb/mi_docker/tab/backups
 docker run -d \
   --name kekeio-tab \
   --restart unless-stopped \
-  -p 8881:8881 \
+  -p 9009:9009 \
   -e FULLPRO_ADMIN_ALLOWED_CIDRS=192.168.50.0/24 \
   -v /mnt/usb-24aeefbb/mi_docker/tab/data:/data \
   -v /mnt/usb-24aeefbb/mi_docker/tab/backups:/backups \
