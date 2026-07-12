@@ -31,25 +31,27 @@ jobs:
         with:
           node-version: 22
 
-      - name: Enable Corepack
-        run: corepack enable
+      - name: Activate pnpm 11.6.0
+        run: |
+          corepack enable
+          corepack install --global pnpm@11.6.0
 
       - name: Install admin dependencies
-        run: corepack pnpm --dir backend/admin-ui install --frozen-lockfile
+        run: pnpm --dir backend/admin-ui install --frozen-lockfile
 
       - name: Install extension dependencies
-        run: corepack pnpm --dir extension install --frozen-lockfile
+        run: pnpm --dir extension install --frozen-lockfile
 
       - name: Test and build admin UI
         run: |
-          corepack pnpm --dir backend/admin-ui test
-          corepack pnpm --dir backend/admin-ui build
+          pnpm --dir backend/admin-ui test
+          pnpm --dir backend/admin-ui build
 
       - name: Test and build extension
         run: |
-          corepack pnpm --dir extension test
-          corepack pnpm --dir extension typecheck
-          corepack pnpm --dir extension build
+          pnpm --dir extension test
+          pnpm --dir extension typecheck
+          pnpm --dir extension build
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -77,15 +79,17 @@ jobs:
         with:
           node-version: 22
 
-      - name: Enable Corepack
-        run: corepack enable
+      - name: Activate pnpm 11.6.0
+        run: |
+          corepack enable
+          corepack install --global pnpm@11.6.0
 
       - name: Build embedded admin UI and extension
         run: |
-          corepack pnpm --dir backend/admin-ui install --frozen-lockfile
-          corepack pnpm --dir backend/admin-ui build
-          corepack pnpm --dir extension install --frozen-lockfile
-          corepack pnpm --dir extension build
+          pnpm --dir backend/admin-ui install --frozen-lockfile
+          pnpm --dir backend/admin-ui build
+          pnpm --dir extension install --frozen-lockfile
+          pnpm --dir extension build
 
       - name: Set up Go
         uses: actions/setup-go@v5
