@@ -1,0 +1,52 @@
+# Runtime state, secrets, databases, and backups
+backend/data/
+backend/backups/
+backend/.dev-data/
+data/
+backups/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.pre-migration-*.sqlite
+*.pre-restore-*
+*.restore-intent.json*
+secrets.json
+install-code
+
+# Local environment files and private key material
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Generated binaries and release packages
+backend/bin/
+extension/dist/
+backend/admin-ui/dist/
+backend/admin-ui/coverage/
+kekeio-tab-*.zip
+*.zip
+
+# Dependencies and local diagnostics
+**/node_modules/
+*.log
+.tmp*/
+.external/
+backend-admin-verify.png
+extension-sync-verify.png
+
+# Editor and test-runner output
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+**/playwright-report/
+**/test-results/
+*.coverprofile
+coverage.out

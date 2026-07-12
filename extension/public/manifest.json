@@ -1,0 +1,53 @@
+{
+  "manifest_version": 3,
+  "name": "__MSG_appName__",
+  "description": "__MSG_appDescription__",
+  "version": "0.2.0",
+  "minimum_chrome_version": "114",
+  "default_locale": "zh_CN",
+  "icons": {
+    "16": "assets/icons/icon-16.png",
+    "32": "assets/icons/icon-32.png",
+    "48": "assets/icons/icon-48.png",
+    "128": "assets/icons/icon-128.png"
+  },
+  "action": {
+    "default_title": "__MSG_appName__",
+    "default_icon": {
+      "16": "assets/icons/icon-16.png",
+      "32": "assets/icons/icon-32.png"
+    }
+  },
+  "chrome_url_overrides": {
+    "newtab": "newtab.html"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "permissions": ["storage", "alarms", "search", "declarativeNetRequestWithHostAccess"],
+  "host_permissions": [
+    "https://tab.kekeio.com/*",
+    "https://api.github.com/*",
+    "https://gist.githubusercontent.com/*",
+    "https://www.uhdpaper.com/*",
+    "https://*.uhdpaper.com/*"
+  ],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "uhdpaper_rules",
+        "enabled": true,
+        "path": "rules/uhdpaper.json"
+      }
+    ]
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; img-src 'self' data: blob: https:;"
+  }
+}

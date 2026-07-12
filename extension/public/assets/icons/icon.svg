@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title">
+  <title id="title">KeKeIO Tab</title>
+  <rect width="128" height="128" rx="28" fill="#17212b"/>
+  <path d="M27 32h14v24l19-24h18L52 62l27 34H61L41 70v26H27V32Z" fill="#ffffff"/>
+  <path d="M73 32h34v14H97v50H83V46H73V32Z" fill="#0b84d1"/>
+</svg>

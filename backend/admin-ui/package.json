@@ -1,0 +1,30 @@
+{
+  "name": "kekeio-tab-admin-ui",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.6.0",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "build": "pnpm typecheck && vite build"
+  },
+  "dependencies": {
+    "lucide-preact": "^0.468.0",
+    "preact": "^10.25.4",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.10.1",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/preact": "^3.2.4",
+    "@testing-library/user-event": "^14.5.2",
+    "@types/babel__core": "^7.20.5",
+    "@types/node": "^24.10.1",
+    "jsdom": "^25.0.1",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7",
+    "vitest": "^2.1.8"
+  }
+}

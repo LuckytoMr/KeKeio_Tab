@@ -1,0 +1,8 @@
+{
+  "appName": {
+    "message": "KeKeIO Tab"
+  },
+  "appDescription": {
+    "message": "本地优先的新标签页，支持导航分组、壁纸、本地上传、KeKeIO 云同步与 GitHub Gist 备份。"
+  }
+}

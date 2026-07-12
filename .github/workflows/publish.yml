@@ -1,0 +1,181 @@
+name: Verify and publish
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: kekeio-tab-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/kekeio-tab
+
+jobs:
+  verify:
+    name: Verify source
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install admin dependencies
+        run: corepack pnpm --dir backend/admin-ui install --frozen-lockfile
+
+      - name: Install extension dependencies
+        run: corepack pnpm --dir extension install --frozen-lockfile
+
+      - name: Test and build admin UI
+        run: |
+          corepack pnpm --dir backend/admin-ui test
+          corepack pnpm --dir backend/admin-ui build
+
+      - name: Test and build extension
+        run: |
+          corepack pnpm --dir extension test
+          corepack pnpm --dir extension typecheck
+          corepack pnpm --dir extension build
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+
+      - name: Test and vet backend
+        working-directory: backend
+        run: |
+          go test ./... -count=1
+          go vet ./...
+
+  package:
+    name: Build release archives
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Build embedded admin UI and extension
+        run: |
+          corepack pnpm --dir backend/admin-ui install --frozen-lockfile
+          corepack pnpm --dir backend/admin-ui build
+          corepack pnpm --dir extension install --frozen-lockfile
+          corepack pnpm --dir extension build
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+
+      - name: Build Windows and Linux ARM64 server binaries
+        working-directory: backend
+        run: |
+          mkdir -p bin
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o bin/fullpro-server.exe ./cmd/fullpro-server
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o bin/fullpro-server-linux-arm64 ./cmd/fullpro-server
+
+      - name: Create release archives
+        run: |
+          mkdir -p release
+          cd backend
+          zip -qr ../release/kekeio-tab-backend.zip cmd internal admin-ui bin Dockerfile .dockerignore .env.example go.mod go.sum README.md \
+            -x 'admin-ui/node_modules/*' 'admin-ui/dist/*' 'admin-ui/coverage/*'
+          cd ../extension
+          zip -qr ../release/kekeio-tab-extension.zip dist
+
+      - name: Upload release archives
+        uses: actions/upload-artifact@v4
+        with:
+          name: kekeio-tab-release
+          path: release/*.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  publish-image:
+    name: Publish GHCR image
+    if: github.event_name != 'pull_request'
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@65b78e6e13532edd9afa3aa52ac7964289d1a9c1
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push image
+        uses: docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  release:
+    name: Create GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [package, publish-image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release archives
+        uses: actions/download-artifact@v4
+        with:
+          name: kekeio-tab-release
+          path: release
+
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" release/*.zip --generate-notes --title "KeKeIO Tab ${GITHUB_REF_NAME}"

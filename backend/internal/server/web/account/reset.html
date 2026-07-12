@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>重置密码 · KeKeIO Tab</title>
+    <link rel="stylesheet" href="assets/account.css">
+    <script src="assets/reset.js" defer></script>
+  </head>
+  <body>
+    <main class="account-card">
+      <div class="brand-mark" aria-hidden="true">KT</div>
+      <p class="eyebrow">KeKeIO Tab Account</p>
+      <h1>重置密码</h1>
+      <form id="reset-form" class="account-form" hidden>
+        <label for="password">新密码</label>
+        <input id="password" name="password" type="password" minlength="8" autocomplete="new-password" required>
+        <label for="password-confirmation">确认新密码</label>
+        <input id="password-confirmation" name="passwordConfirmation" type="password" minlength="8" autocomplete="new-password" required>
+        <button type="submit">保存新密码</button>
+      </form>
+      <p id="account-status" class="status" role="status" aria-live="polite">正在读取重置链接…</p>
+      <p class="hint">保存成功后，所有旧会话会失效，请返回浏览器扩展重新登录。</p>
+    </main>
+  </body>
+</html>

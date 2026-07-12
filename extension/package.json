@@ -1,0 +1,31 @@
+{
+  "name": "kekeio-tab",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.6.0",
+  "scripts": {
+    "dev": "vite",
+    "icons": "node scripts/render-icons.mjs",
+    "build": "tsc --noEmit && vite build",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@preact/signals": "^2.3.1",
+    "dexie": "^4.0.11",
+    "lucide-preact": "^0.468.0",
+    "preact": "^10.25.4",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.10.1",
+    "@types/chrome": "^0.0.287",
+    "@types/node": "^24.10.1",
+    "fake-indexeddb": "^6.2.4",
+    "playwright": "^1.61.1",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7",
+    "vitest": "^2.1.8"
+  }
+}
