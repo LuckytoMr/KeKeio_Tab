@@ -132,7 +132,7 @@ jobs:
 
           container_name="kekeio-tab-offline-verify"
           cleanup() {
-            docker rm -f "${container_name}" >/dev/null 2>&1 || true
+            docker rm -f -v "${container_name}" >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
 

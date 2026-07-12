@@ -2,7 +2,7 @@
 
 ## 目标
 
-GitHub Actions 在每次有效发布构建中生成一个已经完成应用编译和镜像封装的 Linux ARM64 Docker 镜像归档。路由器不需要访问私有 GHCR、不需要安装 Go 或 Node.js，也不需要在本地执行 `docker build`；操作者只需下载、解压、执行 `docker load -i`，然后执行固定的 `docker run` 命令。
+GitHub Actions 在每次有效发布构建中生成一个已经完成应用编译和镜像封装的 Linux ARM64 Docker 镜像归档。路由器不需要访问私有 GHCR、不需要安装 Go 或 Node.js，也不需要在本地执行 `docker build`；操作者下载、解压并执行 `docker load -i` 后，使用现有 Compose+Caddy 完成安装和后台部署。受限的裸 bridge 命令仅保留给 `/health/live` 或已有 HTTPS 宿主代理上游，不能替代正式拓扑。
 
 ## 非目标
 
@@ -43,7 +43,7 @@ kekeio-tab:arm64
 
 ## CI 验证和清理
 
-离线镜像验证在 GitHub runner 中完成，不在用户路由器或本地工作站执行。验证容器使用临时数据卷和非冲突宿主端口。工作流通过 shell trap 或无条件清理步骤删除验证容器，避免失败时留下运行资源。
+离线镜像验证在 GitHub runner 中完成，不在用户路由器或本地工作站执行。验证容器使用临时数据卷和非冲突宿主端口。工作流通过 shell trap 的 `docker rm -f -v` 删除验证容器和匿名卷，避免失败时留下运行资源。
 
 验证至少覆盖：
 
@@ -60,29 +60,44 @@ kekeio-tab:arm64
 docker load -i kekeio-tab-docker-arm64.tar
 ```
 
-创建持久化目录并启动：
+在路由器部署包中复制 `router.env.example` 为 `.env`，把 `KEKEIO_IMAGE` 设为 `kekeio-tab:arm64`。持久化目录统一使用当前宿主路径，并在启动前授权：
 
 ```sh
 mkdir -p /mnt/usb-24aeefbb/mi_docker/tab/data
 mkdir -p /mnt/usb-24aeefbb/mi_docker/tab/backups
 chown -R 10001:10001 /mnt/usb-24aeefbb/mi_docker/tab/data
 chown -R 10001:10001 /mnt/usb-24aeefbb/mi_docker/tab/backups
+chmod 700 /mnt/usb-24aeefbb/mi_docker/tab/data
+chmod 700 /mnt/usb-24aeefbb/mi_docker/tab/backups
 
+docker compose --env-file .env -f compose.yaml up -d --pull never
+```
+
+离线路径不登录 GHCR、不执行 pull。Compose 会创建所需的 `kekeio-tab-edge` bridge 网络，并以 `.env` 中精确的 Caddy 静态 IP 配置 `KEKEIO_TRUSTED_PROXIES`；完全离线时 `caddy:2.11.4-alpine` 必须已经在本地镜像缓存。镜像内已经包含监听地址、数据库位置、备份位置、Cookie 安全策略、非 root 用户和健康检查的默认值。管理员 CIDR 必须由部署者按真实局域网配置；数据卷必须保留，确保重建容器后数据库、密钥和备份仍然存在。
+
+如需 SimpleDocker，仅可运行下列受限 bridge 容器以轮询 `/health/live`，或作为已有 HTTPS 宿主代理的受限上游；它不是安装或后台入口：
+
+```sh
 docker run -d \
-  --name kekeio-tab \
-  --restart unless-stopped \
-  -p 9009:9009 \
-  -e FULLPRO_ADMIN_ALLOWED_CIDRS=192.168.50.0/24 \
-  -v /mnt/usb-24aeefbb/mi_docker/tab/data:/data \
-  -v /mnt/usb-24aeefbb/mi_docker/tab/backups:/backups \
+  --name kekeio-tab-health \
+  --network bridge \
+  -p 192.168.50.1:9009:9009 \
+  --read-only \
+  --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+  --cap-drop ALL \
+  --security-opt no-new-privileges:true \
+  --pids-limit 128 \
+  -e 'FULLPRO_ADMIN_ALLOWED_CIDRS=127.0.0.1/32,::1/128,192.168.50.0/24' \
+  -v /mnt/usb-24aeefbb/mi_docker/tab/data:/data:rw \
+  -v /mnt/usb-24aeefbb/mi_docker/tab/backups:/backups:rw \
   kekeio-tab:arm64
 ```
 
-镜像内已经包含监听地址、数据库位置、备份位置、Cookie 安全策略、非 root 用户和健康检查的默认值，因此部署命令不重复声明这些环境变量。管理员 CIDR 必须由部署者按真实局域网配置；数据卷必须保留，确保重建容器后数据库、密钥和备份仍然存在。
+禁止使用全接口 `-p 9009:9009`。裸 bridge 不会复用 Compose 的固定 Caddy trusted-proxy 地址；需要安装或后台时必须回到 Compose+Caddy。
 
 ## 更新与回滚
 
-更新时先下载新的 tar，再执行 `docker load -i`。同名标签会指向新镜像；删除并按同一命令重建容器即可继续使用原持久化目录。需要回滚时，操作者应保留上一版 tar，重新加载旧归档并重建容器。数据库迁移和备份策略继续由应用现有生产逻辑负责。
+更新时保留旧 tar，加载新 tar，并把 `.env` 的 `KEKEIO_IMAGE` 保持为 `kekeio-tab:arm64` 后执行 `docker compose --env-file .env -f compose.yaml up -d --pull never`。回滚时重新加载旧 tar、再次设置同一 `.env` 值并运行相同 Compose 命令。离线更新和回滚不登录 GHCR、不执行 pull，也不为裸 bridge 容器提供后台升级流程。数据库迁移和备份策略继续由应用现有生产逻辑负责。
 
 ## 文档范围
 

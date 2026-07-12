@@ -51,18 +51,18 @@ docker compose --env-file .env -f compose.yaml up -d
 ghcr.io/<GitHub用户名>/kekeio-tab:sha-<完整提交SHA>
 ```
 
-推送 `v*` 标签还会创建私有 GitHub Release，并附带后端与扩展 ZIP；后端 ZIP 包含上述路由器部署文件。普通 `main` 推送或未选择 `v*` 标签的 `workflow_dispatch` 中，`Create GitHub Release` 显示 skipped 是预期行为。
+普通 `main` 推送或未选择 `v*` 标签的 `workflow_dispatch` 会生成保留 14 天的 `kekeio-tab-release` Actions artifact，其中包含三个文件：`kekeio-tab-backend.zip`、`kekeio-tab-extension.zip` 和 `kekeio-tab-docker-arm64.tar`。推送 `v*` 标签还会创建私有 GitHub Release，并持久附带同样的两个 ZIP 和 ARM64 tar；后端 ZIP 包含上述路由器部署文件。普通运行中 `Create GitHub Release` 显示 skipped 是预期行为。
 
 ### 路由器 ARM64 离线镜像
 
-Actions 的 `kekeio-tab-release` 产物包含可直接导入 Docker 的 `kekeio-tab-docker-arm64.tar`。它与 `bin/fullpro-server-linux-arm64` 不同：前者是完整 Docker image archive，后者只是裸可执行文件，不能用于 `docker load`。
+Actions artifact 或 `v*` GitHub Release 中的 `kekeio-tab-docker-arm64.tar` 可直接导入 Docker。它与 `bin/fullpro-server-linux-arm64` 不同：前者是完整 Docker image archive，后者只是裸可执行文件，不能用于 `docker load`。
 
 ```sh
 docker load -i kekeio-tab-docker-arm64.tar
 docker image inspect kekeio-tab:arm64
 ```
 
-离线镜像不需要登录私有 GHCR。完整目录准备和 `docker run` 命令见路由器部署指南。
+导入后，完整安装和后台必须继续使用路由器部署包中的 Compose+Caddy：在 `.env` 设置 `KEKEIO_IMAGE=kekeio-tab:arm64`，然后执行 `docker compose --env-file .env -f compose.yaml up -d --pull never`。不要登录 GHCR，也不要执行 `docker compose pull`；Compose 会自行创建所需 bridge 网络，并继续使用环境文件中精确的 Caddy trusted-proxy 配置。完全离线时，`caddy:2.11.4-alpine` 也必须已存在于 Docker 本地镜像缓存。裸 bridge 启动示例只用于健康检查或已有 HTTPS 宿主代理，不能作为安装或后台入口；完整命令见路由器部署指南。
 
 私有 GHCR 镜像部署前，使用拥有 `read:packages` 权限的 GitHub Personal Access Token 登录：
 

@@ -15,20 +15,26 @@ KeKeIO Tab 的单机自托管后端，提供邮箱验证账号、`SharedProfile 
 # Git 仓库中：cd backend/deploy/router
 # 后端 Release ZIP 解压后：cd deploy/router
 cp router.env.example .env
-# 先填写 KEKEIO_IMAGE，再编辑持久目录、LAN CIDR 和 Docker 网段
+# 私有 GHCR 路径：先填写发布的 KEKEIO_IMAGE，再编辑持久目录、LAN CIDR 和 Docker 网段
 docker compose --env-file .env -f compose.yaml pull
 docker compose --env-file .env -f compose.yaml up -d
 ```
 
 ### 离线 ARM64 Docker 镜像
 
-从 Actions 下载 `kekeio-tab-release` 并解压后，`kekeio-tab-docker-arm64.tar` 已包含完整运行时和后端程序：
+从 Actions 的保留 14 天 artifact 或 `v*` GitHub Release 下载并解压后，`kekeio-tab-docker-arm64.tar` 已包含完整运行时和后端程序：
 
 ```sh
 docker load -i kekeio-tab-docker-arm64.tar
 ```
 
-导入后的镜像名为 `kekeio-tab:arm64`。`bin/fullpro-server-linux-arm64` 是供非 Docker 场景使用的裸二进制，不能执行 `docker load -i bin/fullpro-server-linux-arm64`。
+导入后的镜像名为 `kekeio-tab:arm64`。在 `deploy/router/.env` 中设置 `KEKEIO_IMAGE=kekeio-tab:arm64`，保留 `KEKEIO_TRUSTED_PROXIES=172.30.88.2/32` 与真实 LAN CIDR，然后使用完整的 Compose+Caddy 拓扑启动：
+
+```sh
+docker compose --env-file .env -f compose.yaml up -d --pull never
+```
+
+离线路径不需要登录私有 GHCR，也不执行 `docker compose pull`；Compose 会创建 `kekeio-tab-edge` bridge 网络并让 Caddy 使用该精确可信代理地址。完全离线时，`caddy:2.11.4-alpine` 也必须已经在本地镜像缓存中。`bin/fullpro-server-linux-arm64` 是供非 Docker 场景使用的裸二进制，不能执行 `docker load -i bin/fullpro-server-linux-arm64`。不要用裸 `docker run` 提供安装或后台入口。
 
 默认链路为：
 

@@ -27,48 +27,66 @@ https://tab.kekeio.com:443
 cp router.env.example .env
 ```
 
-编辑 `.env`，至少把 `KEKEIO_IMAGE` 改成 Actions 已发布的 `v*` 或 `sha-<完整提交SHA>` 标签，并确认数据路径、真实 LAN CIDR 和 Docker `/29` 网段。正式扩展把服务地址固定为 `https://tab.kekeio.com`，因此 `KEKEIO_DOMAIN` 必须保持 `tab.kekeio.com`；只有同时修改并重建扩展的 fork 才能使用其他域名。不要把浮动 `latest` 作为常规生产版本。然后创建两个逻辑独立的持久目录；真正抵御磁盘损坏时，应把 `KEKEIO_BACKUP_DIR` 放到第二块介质，或定期复制到另一台设备/离机存储：
+编辑 `.env`，在线 GHCR 路径把 `KEKEIO_IMAGE` 改成 Actions 已发布的 `v*` 或 `sha-<完整提交SHA>` 标签；离线 ARM64 路径在加载 tar 后设置为 `KEKEIO_IMAGE=kekeio-tab:arm64`。同时确认数据路径、真实 LAN CIDR 和 Docker `/29` 网段。正式扩展把服务地址固定为 `https://tab.kekeio.com`，因此 `KEKEIO_DOMAIN` 必须保持 `tab.kekeio.com`；只有同时修改并重建扩展的 fork 才能使用其他域名。不要把浮动 `latest` 作为常规生产版本。然后创建两个逻辑独立的持久目录；真正抵御磁盘损坏时，应把 `KEKEIO_BACKUP_DIR` 放到第二块介质，或定期复制到另一台设备/离机存储：
 
 ```sh
-mkdir -p /mnt/usb-24aeefbb/kekeio-tab/data
-mkdir -p /mnt/usb-24aeefbb/kekeio-tab/backups
-chown -R 10001:10001 /mnt/usb-24aeefbb/kekeio-tab
-chmod 700 /mnt/usb-24aeefbb/kekeio-tab/data
-chmod 700 /mnt/usb-24aeefbb/kekeio-tab/backups
+mkdir -p /mnt/usb-24aeefbb/mi_docker/tab/data
+mkdir -p /mnt/usb-24aeefbb/mi_docker/tab/backups
+chown -R 10001:10001 /mnt/usb-24aeefbb/mi_docker/tab/data
+chown -R 10001:10001 /mnt/usb-24aeefbb/mi_docker/tab/backups
+chmod 700 /mnt/usb-24aeefbb/mi_docker/tab/data
+chmod 700 /mnt/usb-24aeefbb/mi_docker/tab/backups
 ```
 
 镜像内后端以 UID/GID `10001` 运行。bind mount 会覆盖镜像目录本身的属主，跳过上述授权会导致数据库、secrets 或安装码创建失败。Compose 禁止自动创建缺失的宿主目录；后端还会在启动时对 `/backups` 执行写入、`fsync`、删除探测，失败会直接退出，避免“服务 healthy 但备份持续失败”。
 
-## 2. 加载离线 ARM64 镜像并启动后端
+## 2. 加载离线 ARM64 镜像并启动完整 Compose+Caddy 拓扑
 
 从 Actions 的 `kekeio-tab-release` 下载并解压 `kekeio-tab-docker-arm64.tar`，复制到路由器后执行：
 
 ```sh
 docker load -i kekeio-tab-docker-arm64.tar
-mkdir -p /mnt/usb-24aeefbb/mi_docker/tab/data
-mkdir -p /mnt/usb-24aeefbb/mi_docker/tab/backups
-chown -R 10001:10001 /mnt/usb-24aeefbb/mi_docker/tab/data
-chown -R 10001:10001 /mnt/usb-24aeefbb/mi_docker/tab/backups
+docker image inspect kekeio-tab:arm64
+```
 
-docker rm -f kekeio-tab 2>/dev/null || true
+在 `.env` 中设置：
+
+```text
+KEKEIO_IMAGE=kekeio-tab:arm64
+```
+
+然后运行：
+
+```sh
+docker compose --env-file .env -f compose.yaml up -d --pull never
+docker compose --env-file .env -f compose.yaml logs backend
+```
+
+离线 tar 不需要登录私有 GHCR，也不要执行 `docker compose pull`。`--pull never` 让镜像未在本地时直接失败而非访问网络；因此完全离线时 `caddy:2.11.4-alpine` 也必须已经在本地镜像缓存中。Compose 会自行创建 `kekeio-tab-edge` bridge 网络，无需手工 `docker network create`，并会继续使用 `.env` 中精确的 `KEKEIO_TRUSTED_PROXIES=172.30.88.2/32`（或随自定义静态 Caddy IP 相应收窄的 `/32`）。`9009` 仍只是后端 HTTP 上游端口，安装页、后台和正式扩展必须经过该 Compose+Caddy 的可信 HTTPS 入口；不要把 WAN `9009` 直接暴露到公网。
+
+### 可选：SimpleDocker bridge 健康检查/已有 HTTPS 宿主代理上游
+
+下面的裸 bridge 容器只适合访问 `/health/live`，或由已经具备 HTTPS、路径白名单和精确 trusted-proxy 配置的宿主代理作为受限上游使用。它不是 `/install` 或 `/admin` 的部署入口；首次安装和后台始终使用上面的 Compose+Caddy。将 `192.168.50.1` 替换为当前 Docker 主机的 LAN IP：
+
+```sh
+docker rm -f kekeio-tab-health 2>/dev/null || true
 docker run -d \
-  --name kekeio-tab \
+  --name kekeio-tab-health \
+  --network bridge \
   --restart unless-stopped \
-  -p 9009:9009 \
-  -e FULLPRO_ADMIN_ALLOWED_CIDRS=192.168.50.0/24 \
-  -v /mnt/usb-24aeefbb/mi_docker/tab/data:/data \
-  -v /mnt/usb-24aeefbb/mi_docker/tab/backups:/backups \
+  -p 192.168.50.1:9009:9009 \
+  --read-only \
+  --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+  --cap-drop ALL \
+  --security-opt no-new-privileges:true \
+  --pids-limit 128 \
+  -e 'FULLPRO_ADMIN_ALLOWED_CIDRS=127.0.0.1/32,::1/128,192.168.50.0/24' \
+  -v /mnt/usb-24aeefbb/mi_docker/tab/data:/data:rw \
+  -v /mnt/usb-24aeefbb/mi_docker/tab/backups:/backups:rw \
   kekeio-tab:arm64
 ```
 
-检查容器：
-
-```sh
-docker ps
-docker logs --tail 100 kekeio-tab
-```
-
-`9009` 是后端 HTTP 上游端口。安装页、后台和正式扩展仍要求可信 HTTPS 入口；不要把 WAN `9009` 直接暴露到公网。需要无端口域名访问时，继续使用下文的 Caddy/Compose 或等价反向代理配置。
+不得改成全接口 `-p 9009:9009`。裸 bridge 容器没有 Compose 中固定的 Caddy 地址，不能臆造 `FULLPRO_TRUSTED_PROXIES`；已有 HTTPS 宿主代理若要提供安装或后台，必须使用第 6 节的 `compose.host-proxy.yaml`，并把 `.env` 中的可信代理收窄为实际 bridge gateway 的精确 `/32`。
 
 ## 3. 私有 GHCR 与完整 Compose 部署
 
@@ -153,6 +171,8 @@ docker compose --env-file .env -f compose.yaml -f compose.host-proxy.yaml up -d 
 
 ## 7. 升级、回滚与备份
 
+### 在线 GHCR 路径
+
 生产更新优先使用版本标签或镜像 digest，不要长期依赖浮动的 `latest`：
 
 ```sh
@@ -162,4 +182,24 @@ docker compose --env-file .env -f compose.yaml pull
 docker compose --env-file .env -f compose.yaml up -d
 ```
 
-升级前在后台创建完整备份并保存恢复口令，同时记录后端和 Caddy 两个镜像 digest。若升级未改变数据库 schema，可把 `.env` 的两个镜像都改回旧标签/digest 后重新创建容器；若新版本已经迁移数据库，必须先恢复与旧版本兼容的迁移前快照或完整备份，旧二进制会拒绝未来 schema。不要同时运行两个后端实例访问同一个 SQLite 数据目录。同一物理盘上的 `/data` 与 `/backups` 只提供逻辑隔离，不能替代第二介质或离机备份。
+升级前在后台创建完整备份并保存恢复口令，同时记录后端和 Caddy 两个镜像 digest。若升级未改变数据库 schema，可把 `.env` 的两个镜像都改回旧标签/digest 后重新创建容器；若新版本已经迁移数据库，必须先恢复与旧版本兼容的迁移前快照或完整备份，旧二进制会拒绝未来 schema。
+
+### 离线 ARM64 tar 路径
+
+升级前在后台创建完整备份并保留当前与上一版 `kekeio-tab-docker-arm64.tar`，不要用新 tar 覆盖旧 tar。加载新 tar 后，将 `.env` 中的 `KEKEIO_IMAGE` 保持/更新为本地固定标签 `kekeio-tab:arm64`，再由同一份 Compose+Caddy 拓扑重建后端：
+
+```sh
+docker load -i /path/to/kekeio-tab-docker-arm64-new.tar
+# 编辑 .env：KEKEIO_IMAGE=kekeio-tab:arm64
+docker compose --env-file .env -f compose.yaml up -d --pull never
+```
+
+回滚时加载保留的旧 tar，再次把 `.env` 中的 `KEKEIO_IMAGE` 设为 `kekeio-tab:arm64` 后执行相同命令：
+
+```sh
+docker load -i /path/to/kekeio-tab-docker-arm64-previous.tar
+# 编辑 .env：KEKEIO_IMAGE=kekeio-tab:arm64
+docker compose --env-file .env -f compose.yaml up -d --pull never
+```
+
+离线升级和回滚不登录 GHCR，也不执行 pull；裸 bridge 容器只用于健康检查或已有 HTTPS 代理的受限上游，不能为它编造安装后台升级流程。不要同时运行两个后端实例访问同一个 SQLite 数据目录。同一物理盘上的 `/data` 与 `/backups` 只提供逻辑隔离，不能替代第二介质或离机备份。

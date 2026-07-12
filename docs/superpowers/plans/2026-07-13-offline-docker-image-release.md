@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make GitHub Actions publish a prebuilt Linux ARM64 Docker image archive that a Xiaomi router can deploy with `docker load -i` followed by a fixed `docker run` command.
+**Goal:** Make GitHub Actions publish a prebuilt Linux ARM64 Docker image archive that a Xiaomi router loads with `docker load -i` and deploys through Compose+Caddy; retain only a hardened bridge command for `/health/live` or an already configured HTTPS host-proxy upstream.
 
 **Architecture:** Extend the existing `package` job so the same GitHub Actions artifact contains the backend ZIP, extension ZIP, and a Docker image archive tagged `kekeio-tab:arm64`. Buildx exports Docker archive format, then the CI runner loads the archive, verifies its platform, launches it under QEMU, and polls the liveness endpoint before upload. The existing multi-architecture GHCR publication remains private and unchanged.
 
@@ -25,7 +25,7 @@
 ## File Structure
 
 - Modify `.github/workflows/publish.yml`: build, verify, upload, and release the Docker ARM64 archive.
-- Modify `README.md`: describe the new offline artifact and the minimal load/run path.
+- Modify `README.md`: describe the new offline artifact and the Compose+Caddy load path.
 - Modify `backend/README.md`: distinguish the complete Docker archive from the standalone ARM64 binary.
 - Modify `backend/deploy/router/README.md`: add the router-first offline deployment procedure while retaining the private GHCR/Compose procedure.
 - Modify `docs/superpowers/plans/2026-07-13-offline-docker-image-release.md`: check completed steps during execution.
@@ -84,7 +84,7 @@ Insert these steps after `Build Windows and Linux ARM64 server binaries` and bef
 
           container_name="kekeio-tab-offline-verify"
           cleanup() {
-            docker rm -f "${container_name}" >/dev/null 2>&1 || true
+             docker rm -f -v "${container_name}" >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
 
@@ -183,7 +183,7 @@ Expected: commit contains only the workflow and checked plan progress.
 
 **Interfaces:**
 - Consumes: `kekeio-tab-docker-arm64.tar`, `kekeio-tab:arm64`, backend UID `10001`, port `9009`, `/data`, and `/backups` from Task 1 and `backend/Dockerfile`.
-- Produces: one consistent operator procedure for Actions download → `docker load` → `docker run`.
+- Produces: one consistent operator procedure for Actions download → `docker load` → Compose+Caddy, plus a hardened health-only bridge example.
 
 - [x] **Step 1: Run a documentation assertion that demonstrates the new operator path is absent**
 
@@ -214,7 +214,7 @@ docker load -i kekeio-tab-docker-arm64.tar
 docker image inspect kekeio-tab:arm64
 ```
 
-离线镜像不需要登录私有 GHCR。完整目录准备和 `docker run` 命令见路由器部署指南。
+离线镜像不需要登录私有 GHCR。完整安装和后台使用 `KEKEIO_IMAGE=kekeio-tab:arm64` 的 Compose+Caddy；裸 bridge 命令只用于健康检查或已有 HTTPS 宿主代理上游。
 ````
 
 - [x] **Step 3: Add the backend archive distinction to `backend/README.md`**
@@ -238,36 +238,49 @@ docker load -i kekeio-tab-docker-arm64.tar
 Before the existing private-GHCR login section, add:
 
 ````markdown
-## 2. 加载离线 ARM64 镜像并启动后端
+## 2. 加载离线 ARM64 镜像并启动完整 Compose+Caddy 拓扑
 
 从 Actions 的 `kekeio-tab-release` 下载并解压 `kekeio-tab-docker-arm64.tar`，复制到路由器后执行：
 
 ```sh
 docker load -i kekeio-tab-docker-arm64.tar
+docker image inspect kekeio-tab:arm64
 mkdir -p /mnt/usb-24aeefbb/mi_docker/tab/data
 mkdir -p /mnt/usb-24aeefbb/mi_docker/tab/backups
 chown -R 10001:10001 /mnt/usb-24aeefbb/mi_docker/tab/data
 chown -R 10001:10001 /mnt/usb-24aeefbb/mi_docker/tab/backups
+chmod 700 /mnt/usb-24aeefbb/mi_docker/tab/data
+chmod 700 /mnt/usb-24aeefbb/mi_docker/tab/backups
+```
 
-docker rm -f kekeio-tab 2>/dev/null || true
+在 `.env` 设置 `KEKEIO_IMAGE=kekeio-tab:arm64`，保留精确的 `KEKEIO_TRUSTED_PROXIES=172.30.88.2/32`，然后执行：
+
+```sh
+docker compose --env-file .env -f compose.yaml up -d --pull never
+docker compose --env-file .env -f compose.yaml logs backend
+```
+
+离线路径不登录 GHCR、不执行 pull。Compose 会创建 bridge 网络并让 Caddy 使用精确 trusted-proxy 设置；完全离线时 Caddy 镜像也必须已经存在于本地缓存。`9009` 是后端 HTTP 上游端口，安装页、后台和正式扩展仍要求可信 HTTPS 入口；不要把 WAN `9009` 直接暴露到公网。
+
+可选 SimpleDocker bridge 仅用于 `/health/live` 或已有 HTTPS 宿主代理的受限上游，绝不是安装后台入口：
+
+```sh
 docker run -d \
-  --name kekeio-tab \
-  --restart unless-stopped \
-  -p 9009:9009 \
-  -e FULLPRO_ADMIN_ALLOWED_CIDRS=192.168.50.0/24 \
-  -v /mnt/usb-24aeefbb/mi_docker/tab/data:/data \
-  -v /mnt/usb-24aeefbb/mi_docker/tab/backups:/backups \
+  --name kekeio-tab-health \
+  --network bridge \
+  -p 192.168.50.1:9009:9009 \
+  --read-only \
+  --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+  --cap-drop ALL \
+  --security-opt no-new-privileges:true \
+  --pids-limit 128 \
+  -e 'FULLPRO_ADMIN_ALLOWED_CIDRS=127.0.0.1/32,::1/128,192.168.50.0/24' \
+  -v /mnt/usb-24aeefbb/mi_docker/tab/data:/data:rw \
+  -v /mnt/usb-24aeefbb/mi_docker/tab/backups:/backups:rw \
   kekeio-tab:arm64
 ```
 
-检查容器：
-
-```sh
-docker ps
-docker logs --tail 100 kekeio-tab
-```
-
-`9009` 是后端 HTTP 上游端口。安装页、后台和正式扩展仍要求可信 HTTPS 入口；不要把 WAN `9009` 直接暴露到公网。需要无端口域名访问时，继续使用下文的 Caddy/Compose 或等价反向代理配置。
+禁止全接口 `-p 9009:9009`；需要安装或后台时回到 Compose+Caddy。
 ````
 
 Rename the existing `## 2. 登录 GHCR 并启动` heading to `## 3. 私有 GHCR 与完整 Compose 部署`, then increment the following numbered headings by one so the final sequence is 1 through 7.
@@ -285,7 +298,7 @@ foreach ($file in $files) {
   }
 }
 $router = Get-Content -Raw 'backend/deploy/router/README.md'
-foreach ($required in @('kekeio-tab:arm64', 'FULLPRO_ADMIN_ALLOWED_CIDRS=192.168.50.0/24', '不要把 WAN `9009` 直接暴露到公网')) {
+foreach ($required in @('kekeio-tab:arm64', 'docker compose --env-file .env -f compose.yaml up -d --pull never', '--network bridge', '-p 192.168.50.1:9009:9009', '不要把 WAN `9009` 直接暴露到公网')) {
   if (-not $router.Contains($required)) { throw "Router guide is missing $required" }
 }
 git diff --check
@@ -402,14 +415,11 @@ mkdir -p /mnt/usb-24aeefbb/mi_docker/tab/data
 mkdir -p /mnt/usb-24aeefbb/mi_docker/tab/backups
 chown -R 10001:10001 /mnt/usb-24aeefbb/mi_docker/tab/data
 chown -R 10001:10001 /mnt/usb-24aeefbb/mi_docker/tab/backups
-docker rm -f kekeio-tab 2>/dev/null || true
-docker run -d \
-  --name kekeio-tab \
-  --restart unless-stopped \
-  -p 9009:9009 \
-  -e FULLPRO_ADMIN_ALLOWED_CIDRS=192.168.50.0/24 \
-  -v /mnt/usb-24aeefbb/mi_docker/tab/data:/data \
-  -v /mnt/usb-24aeefbb/mi_docker/tab/backups:/backups \
-  kekeio-tab:arm64
-docker logs --tail 100 kekeio-tab
+chmod 700 /mnt/usb-24aeefbb/mi_docker/tab/data
+chmod 700 /mnt/usb-24aeefbb/mi_docker/tab/backups
+# 在 .env 设置 KEKEIO_IMAGE=kekeio-tab:arm64
+docker compose --env-file .env -f compose.yaml up -d --pull never
+docker compose --env-file .env -f compose.yaml logs backend
 ```
+
+该完整路径不登录 GHCR、不执行 pull，并由 Compose 创建 bridge 网络和保留精确的 Caddy trusted-proxy 设置。若只需 `/health/live`，可使用 Task 2 中受限的 `--network bridge` 示例；不要把裸 bridge 容器当作安装后台或升级入口。
