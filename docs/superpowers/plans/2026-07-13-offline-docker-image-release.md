@@ -204,7 +204,7 @@ Expected: command fails and names at least `README.md`.
 
 Add this subsection under `## GitHub 自动构建与发布`, before the private GHCR login instructions:
 
-```markdown
+````markdown
 ### 路由器 ARM64 离线镜像
 
 Actions 的 `kekeio-tab-release` 产物包含可直接导入 Docker 的 `kekeio-tab-docker-arm64.tar`。它与 `bin/fullpro-server-linux-arm64` 不同：前者是完整 Docker image archive，后者只是裸可执行文件，不能用于 `docker load`。
@@ -215,13 +215,13 @@ docker image inspect kekeio-tab:arm64
 ```
 
 离线镜像不需要登录私有 GHCR。完整目录准备和 `docker run` 命令见路由器部署指南。
-```
+````
 
 - [ ] **Step 3: Add the backend archive distinction to `backend/README.md`**
 
 Add this subsection immediately after the opening Docker deployment commands:
 
-```markdown
+````markdown
 ### 离线 ARM64 Docker 镜像
 
 从 Actions 下载 `kekeio-tab-release` 并解压后，`kekeio-tab-docker-arm64.tar` 已包含完整运行时和后端程序：
@@ -231,13 +231,13 @@ docker load -i kekeio-tab-docker-arm64.tar
 ```
 
 导入后的镜像名为 `kekeio-tab:arm64`。`bin/fullpro-server-linux-arm64` 是供非 Docker 场景使用的裸二进制，不能执行 `docker load -i bin/fullpro-server-linux-arm64`。
-```
+````
 
 - [ ] **Step 4: Add the router-first offline procedure to `backend/deploy/router/README.md`**
 
 Before the existing private-GHCR login section, add:
 
-```markdown
+````markdown
 ## 2. 加载离线 ARM64 镜像并启动后端
 
 从 Actions 的 `kekeio-tab-release` 下载并解压 `kekeio-tab-docker-arm64.tar`，复制到路由器后执行：
@@ -268,7 +268,7 @@ docker logs --tail 100 kekeio-tab
 ```
 
 `8881` 是后端 HTTP 上游端口。安装页、后台和正式扩展仍要求可信 HTTPS 入口；不要把 WAN `8881` 直接暴露到公网。需要无端口域名访问时，继续使用下文的 Caddy/Compose 或等价反向代理配置。
-```
+````
 
 Rename the existing `## 2. 登录 GHCR 并启动` heading to `## 3. 私有 GHCR 与完整 Compose 部署`, then increment the following numbered headings by one so the final sequence is 1 through 7.
 
