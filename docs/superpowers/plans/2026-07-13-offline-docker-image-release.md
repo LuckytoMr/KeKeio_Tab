@@ -185,7 +185,7 @@ Expected: commit contains only the workflow and checked plan progress.
 - Consumes: `kekeio-tab-docker-arm64.tar`, `kekeio-tab:arm64`, backend UID `10001`, port `8881`, `/data`, and `/backups` from Task 1 and `backend/Dockerfile`.
 - Produces: one consistent operator procedure for Actions download → `docker load` → `docker run`.
 
-- [ ] **Step 1: Run a documentation assertion that demonstrates the new operator path is absent**
+- [x] **Step 1: Run a documentation assertion that demonstrates the new operator path is absent**
 
 Run:
 
@@ -200,7 +200,7 @@ foreach ($file in $files) {
 
 Expected: command fails and names at least `README.md`.
 
-- [ ] **Step 2: Add the offline artifact contract to the root README**
+- [x] **Step 2: Add the offline artifact contract to the root README**
 
 Add this subsection under `## GitHub 自动构建与发布`, before the private GHCR login instructions:
 
@@ -217,7 +217,7 @@ docker image inspect kekeio-tab:arm64
 离线镜像不需要登录私有 GHCR。完整目录准备和 `docker run` 命令见路由器部署指南。
 ````
 
-- [ ] **Step 3: Add the backend archive distinction to `backend/README.md`**
+- [x] **Step 3: Add the backend archive distinction to `backend/README.md`**
 
 Add this subsection immediately after the opening Docker deployment commands:
 
@@ -233,7 +233,7 @@ docker load -i kekeio-tab-docker-arm64.tar
 导入后的镜像名为 `kekeio-tab:arm64`。`bin/fullpro-server-linux-arm64` 是供非 Docker 场景使用的裸二进制，不能执行 `docker load -i bin/fullpro-server-linux-arm64`。
 ````
 
-- [ ] **Step 4: Add the router-first offline procedure to `backend/deploy/router/README.md`**
+- [x] **Step 4: Add the router-first offline procedure to `backend/deploy/router/README.md`**
 
 Before the existing private-GHCR login section, add:
 
@@ -272,7 +272,7 @@ docker logs --tail 100 kekeio-tab
 
 Rename the existing `## 2. 登录 GHCR 并启动` heading to `## 3. 私有 GHCR 与完整 Compose 部署`, then increment the following numbered headings by one so the final sequence is 1 through 7.
 
-- [ ] **Step 5: Run fresh documentation validation**
+- [x] **Step 5: Run fresh documentation validation**
 
 Run:
 
@@ -293,7 +293,7 @@ git diff --check
 
 Expected: exit code `0` and no whitespace errors.
 
-- [ ] **Step 6: Commit the documentation change**
+- [x] **Step 6: Commit the documentation change**
 
 ```powershell
 git add README.md backend/README.md backend/deploy/router/README.md docs/superpowers/plans/2026-07-13-offline-docker-image-release.md

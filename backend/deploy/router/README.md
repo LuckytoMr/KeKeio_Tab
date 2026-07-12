@@ -39,7 +39,38 @@ chmod 700 /mnt/usb-24aeefbb/kekeio-tab/backups
 
 镜像内后端以 UID/GID `10001` 运行。bind mount 会覆盖镜像目录本身的属主，跳过上述授权会导致数据库、secrets 或安装码创建失败。Compose 禁止自动创建缺失的宿主目录；后端还会在启动时对 `/backups` 执行写入、`fsync`、删除探测，失败会直接退出，避免“服务 healthy 但备份持续失败”。
 
-## 2. 登录 GHCR 并启动
+## 2. 加载离线 ARM64 镜像并启动后端
+
+从 Actions 的 `kekeio-tab-release` 下载并解压 `kekeio-tab-docker-arm64.tar`，复制到路由器后执行：
+
+```sh
+docker load -i kekeio-tab-docker-arm64.tar
+mkdir -p /mnt/usb-24aeefbb/mi_docker/tab/data
+mkdir -p /mnt/usb-24aeefbb/mi_docker/tab/backups
+chown -R 10001:10001 /mnt/usb-24aeefbb/mi_docker/tab/data
+chown -R 10001:10001 /mnt/usb-24aeefbb/mi_docker/tab/backups
+
+docker rm -f kekeio-tab 2>/dev/null || true
+docker run -d \
+  --name kekeio-tab \
+  --restart unless-stopped \
+  -p 8881:8881 \
+  -e FULLPRO_ADMIN_ALLOWED_CIDRS=192.168.50.0/24 \
+  -v /mnt/usb-24aeefbb/mi_docker/tab/data:/data \
+  -v /mnt/usb-24aeefbb/mi_docker/tab/backups:/backups \
+  kekeio-tab:arm64
+```
+
+检查容器：
+
+```sh
+docker ps
+docker logs --tail 100 kekeio-tab
+```
+
+`8881` 是后端 HTTP 上游端口。安装页、后台和正式扩展仍要求可信 HTTPS 入口；不要把 WAN `8881` 直接暴露到公网。需要无端口域名访问时，继续使用下文的 Caddy/Compose 或等价反向代理配置。
+
+## 3. 私有 GHCR 与完整 Compose 部署
 
 ```sh
 echo "$GHCR_TOKEN" | docker login ghcr.io -u LuckytoMr --password-stdin
@@ -50,7 +81,7 @@ docker compose --env-file .env -f compose.yaml logs backend
 
 首次启动日志会打印一次性安装码，并把它保存到数据目录的 `install-code`。Docker 健康检查使用 `/health/live`；Caddy 会等待该检查通过后启动。安装完成前 `/health/ready` 返回 503 是正常的 readiness 门禁。
 
-## 3. 路由器端口与 DNS
+## 4. 路由器端口与 DNS
 
 如果 Docker 运行在一台独立 LAN 主机（例如 `192.168.50.9`），按下表添加 IPv4 TCP 转发：
 
@@ -71,7 +102,7 @@ DNS 只负责把域名解析成 IP，不负责端口转换。本部署只支持 
 
 IPv6 通常不做 NAT。AAAA 记录启用前必须确认外部 TCP `443` 能以标准端口直达 Caddy；只开放 `8443` 却发布 AAAA 会让部分客户端优先 IPv6 后连接失败。
 
-## 4. 完成安装
+## 5. 完成安装
 
 局域网直接打开 `https://tab.kekeio.com` 会跳转到后台；首次安装也可直接打开：
 
@@ -104,7 +135,7 @@ https://tab.kekeio.com/api/admin/v1/overview
 
 上面的真实外网 404 验证是上线阻断门禁：任一管理地址不是 404，就停止部署，不得把域名交给正式扩展使用。
 
-## 5. 已有反向代理
+## 6. 已有反向代理
 
 默认 Compose 不发布后端宿主端口，避免绕过 Caddy 白名单。若现有代理也运行在容器中，优先把它加入 `kekeio-tab-edge` 网络，给它固定 IP，把 `.env` 的 `KEKEIO_TRUSTED_PROXIES` 改成该 IP 的 `/32`，然后只启动后端：
 
@@ -120,7 +151,7 @@ docker compose --env-file .env -f compose.yaml -f compose.host-proxy.yaml up -d 
 
 宿主机代理上游使用 `127.0.0.1:8881`。Docker Engine 低于 28 时，同一二层网络的其他主机可能访问仅绑定 localhost 的发布端口；旧引擎不要使用这个 override，应改用同网络容器代理或额外防火墙隔离。代理必须清除客户端伪造的转发头，再设置可信的 `X-Forwarded-For`、`X-Forwarded-Proto`，并复制本目录 Caddyfile 的公网路径白名单（包括 `/account/assets/*`）。
 
-## 6. 升级、回滚与备份
+## 7. 升级、回滚与备份
 
 生产更新优先使用版本标签或镜像 digest，不要长期依赖浮动的 `latest`：
 

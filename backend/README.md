@@ -20,6 +20,16 @@ docker compose --env-file .env -f compose.yaml pull
 docker compose --env-file .env -f compose.yaml up -d
 ```
 
+### 离线 ARM64 Docker 镜像
+
+从 Actions 下载 `kekeio-tab-release` 并解压后，`kekeio-tab-docker-arm64.tar` 已包含完整运行时和后端程序：
+
+```sh
+docker load -i kekeio-tab-docker-arm64.tar
+```
+
+导入后的镜像名为 `kekeio-tab:arm64`。`bin/fullpro-server-linux-arm64` 是供非 Docker 场景使用的裸二进制，不能执行 `docker load -i bin/fullpro-server-linux-arm64`。
+
 默认链路为：
 
 ```text

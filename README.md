@@ -53,6 +53,17 @@ ghcr.io/<GitHub用户名>/kekeio-tab:sha-<完整提交SHA>
 
 推送 `v*` 标签还会创建私有 GitHub Release，并附带后端与扩展 ZIP；后端 ZIP 包含上述路由器部署文件。普通 `main` 推送或未选择 `v*` 标签的 `workflow_dispatch` 中，`Create GitHub Release` 显示 skipped 是预期行为。
 
+### 路由器 ARM64 离线镜像
+
+Actions 的 `kekeio-tab-release` 产物包含可直接导入 Docker 的 `kekeio-tab-docker-arm64.tar`。它与 `bin/fullpro-server-linux-arm64` 不同：前者是完整 Docker image archive，后者只是裸可执行文件，不能用于 `docker load`。
+
+```sh
+docker load -i kekeio-tab-docker-arm64.tar
+docker image inspect kekeio-tab:arm64
+```
+
+离线镜像不需要登录私有 GHCR。完整目录准备和 `docker run` 命令见路由器部署指南。
+
 私有 GHCR 镜像部署前，使用拥有 `read:packages` 权限的 GitHub Personal Access Token 登录：
 
 ```sh
