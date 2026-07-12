@@ -106,9 +106,56 @@ jobs:
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o bin/fullpro-server.exe ./cmd/fullpro-server
           GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o bin/fullpro-server-linux-arm64 ./cmd/fullpro-server
 
+      - name: Set up QEMU for offline ARM64 image
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
+
+      - name: Set up Buildx for offline ARM64 image
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+
+      - name: Build offline ARM64 Docker archive
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          platforms: linux/arm64
+          tags: kekeio-tab:arm64
+          outputs: type=docker,dest=${{ runner.temp }}/kekeio-tab-docker-arm64.tar
+
+      - name: Verify offline ARM64 Docker archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="${RUNNER_TEMP}/kekeio-tab-docker-arm64.tar"
+          test -s "${archive}"
+          docker load -i "${archive}"
+          test "$(docker image inspect kekeio-tab:arm64 --format '{{.Os}}/{{.Architecture}}')" = "linux/arm64"
+
+          container_name="kekeio-tab-offline-verify"
+          cleanup() {
+            docker rm -f "${container_name}" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          docker run -d \
+            --name "${container_name}" \
+            --platform linux/arm64 \
+            -p 127.0.0.1:18881:8881 \
+            kekeio-tab:arm64
+
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error http://127.0.0.1:18881/health/live >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+
+          docker logs "${container_name}"
+          exit 1
+
       - name: Create release archives
         run: |
           mkdir -p release
+          mv "${RUNNER_TEMP}/kekeio-tab-docker-arm64.tar" release/kekeio-tab-docker-arm64.tar
           cd backend
           zip -qr ../release/kekeio-tab-backend.zip cmd internal admin-ui bin deploy Dockerfile .dockerignore .env.example go.mod go.sum README.md \
             -x 'admin-ui/node_modules/*' 'admin-ui/dist/*' 'admin-ui/coverage/*'
@@ -119,7 +166,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: kekeio-tab-release
-          path: release/*.zip
+          path: |
+            release/*.zip
+            release/*.tar
           if-no-files-found: error
           retention-days: 14
 
@@ -186,4 +235,4 @@ jobs:
       - name: Publish release assets
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${GITHUB_REF_NAME}" release/*.zip --generate-notes --title "KeKeIO Tab ${GITHUB_REF_NAME}"
+        run: gh release create "${GITHUB_REF_NAME}" release/*.zip release/*.tar --generate-notes --title "KeKeIO Tab ${GITHUB_REF_NAME}"
