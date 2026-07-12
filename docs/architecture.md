@@ -34,12 +34,12 @@ KeKeIO Tab 是本地优先的新标签页扩展。后端运行在路由器或家
 ## 2. 已锁定的产品决策
 
 - 后台受众：单人自托管管理员，不实现多管理员 RBAC 或商业多租户。
-- 部署：路由器运行后端；公网只开放 HTTPS 插件 API；安装页和后台只允许本机/局域网。
+- 部署：路由器通过 Docker Compose 运行后端与 Caddy；后端内部端口固定为 `8881`，公网只开放标准 `80/443`，安装页和后台只允许本机/局域网。
 - 后台布局：采用“分区式运维工作台”，资源编辑吸收列表 + 详情编辑器模式。
 - 插件账号：允许开放注册，但必须完成邮件验证，并受限流和容量配额保护。
 - 管理员初始化：首次启动进入 Web 安装向导，不再内置任何默认账号或密码。
 - 冲突：三方自动合并非重叠修改；同一实体或同一设置的重叠修改由用户选择。
-- 后台前端：Preact + Vite 构建，产物继续嵌入 Go 二进制；运行时仍为单容器、单服务。
+- 后台前端：Preact + Vite 构建，产物继续嵌入 Go 二进制；后端运行时仍为单容器、单进程，边缘 Caddy 独立负责 TLS 与路径过滤。
 - 远程风格：使用受限 CSS 包，禁止任意外链和危险规则；必须经过校验、预览、发布和回滚。
 - GitHub Gist：仅作为手动备份/恢复通道，不与后端进行双向实时同步。
 
@@ -49,12 +49,13 @@ KeKeIO Tab 是本地优先的新标签页扩展。后端运行在路由器或家
 
 | 表面 | 暴露范围 | 认证 |
 |---|---|---|
-| `/health/live` | 本机、局域网或容器健康检查 | 无敏感数据 |
-| `/health/ready` | 本机、局域网或容器编排 | 无敏感数据；返回数据库/迁移 readiness |
+| `/` | HTTPS 公网返回后端 liveness；允许的局域网来源跳转 `/admin` | 无敏感数据 |
+| `/health/live` | HTTPS 公网、本机、局域网或容器健康检查 | 无敏感数据 |
+| `/health/ready` | HTTPS 公网、本机、局域网或容器编排 | 无敏感数据；返回数据库/迁移 readiness |
 | `/api/v1/auth/register`、verify/resend/login/forgot/reset、`/api/v1/app/bootstrap` | HTTPS 公网域名 | 匿名 + 专用限流；一次性 token 端点另验 token |
 | `/api/v1/auth/refresh` | HTTPS 公网域名 | rotating refresh token |
 | 其余 `/api/v1/*` | HTTPS 公网域名 | 插件 access token |
-| `/account/verify`、`/account/reset` | HTTPS 公网域名 | 一次性邮件 token；最小公开页面 |
+| `/account/verify`、`/account/reset`、`/account/assets/*` | HTTPS 公网域名 | 一次性邮件 token；最小公开页面及其 CSS/JS |
 | `/install/*` | 仅管理员 CIDR；仅未安装/重置时存在；除 strict loopback 外要求 HTTPS | bootstrap token 后建立安装会话；写操作加 CSRF |
 | `/admin/*` | 仅管理员 CIDR，包括 shell 和所有静态资源；除 strict loopback 外要求 HTTPS | 可加载登录壳；业务数据不匿名返回 |
 | `/api/admin/v1/auth/session`、`/api/admin/v1/auth/login` | 仅管理员 CIDR | pre-auth Cookie；登录写请求加 Origin/CSRF/JSON |
@@ -62,6 +63,8 @@ KeKeIO Tab 是本地优先的新标签页扩展。后端运行在路由器或家
 | `/metrics` | 默认关闭；启用时仅本机/局域网 | 独立配置 |
 
 反向代理只在直接对端属于 `trusted_proxies` 时读取转发头，并从右向左剥离可信代理；不再信任客户端预置的 `X-Forwarded-For` 最左值。非法 CIDR、代理或来源配置必须令服务启动失败。
+
+生产流量固定经过 `tab.kekeio.com:443 → Caddy:443 → backend:8881`。路由器可把 WAN `80/443` 转换到 Docker 主机高位端口 `8080/8443`，但不得把 WAN `8881` 直接转给后端。Caddy 对公网只放行根路径在线状态、插件 API、账号页及其静态资源和健康端点；管理/安装路由要求私网来源，其他路径返回 404。
 
 监听地址、数据目录、管理员 CIDR 和 trusted proxies 属于启动级安全配置，只能通过环境变量或 CLI 修改，后台只读展示并生成重启指引；公网 URL、扩展 ID 白名单、SMTP、配额和保留策略存入数据库/secrets，可在后台校验后修改。安装前网络门只读取启动配置：管理员 CIDR 默认允许 loopback、RFC1918 和 ULA 私网范围，trusted proxies 默认空列表；访问者仍必须验证安装码。
 
@@ -82,7 +85,7 @@ KeKeIO Tab 是本地优先的新标签页扩展。后端运行在路由器或家
 
 ### 3.3 后台前端
 
-新增独立的轻量 Preact 管理台源码，Vite 输出带内容哈希的静态文件，由 Go `embed` 内嵌。Docker 构建阶段增加 Node 构建，运行镜像仍只包含 Go 二进制和数据目录。
+新增独立的轻量 Preact 管理台源码，Vite 输出带内容哈希的静态文件，由 Go `embed` 内嵌。Docker 构建阶段使用 Node.js 24 LTS，运行镜像仍只包含 Go 二进制，并把数据与备份目录分别挂载到 `/data`、`/backups`。
 
 前端使用路由级数据加载、独立错误边界、Zod 响应验证和统一组件状态，不再在登录后用 `Promise.all` 拉取所有数据。
 

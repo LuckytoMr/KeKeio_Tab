@@ -127,7 +127,52 @@ func (s *Store) RunBackupScheduler(ctx context.Context, interval time.Duration, 
 	}
 }
 
+func (s *Store) SetBackupDirectoryOverride(directory string) error {
+	directory = strings.TrimSpace(directory)
+	if directory == "" {
+		s.backupDirectoryOverride = ""
+		return nil
+	}
+	if !filepath.IsAbs(directory) {
+		return fmt.Errorf("backup directory override must be an absolute path")
+	}
+	directory = filepath.Clean(directory)
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		return fmt.Errorf("create backup directory override: %w", err)
+	}
+	probe, err := os.CreateTemp(directory, ".fullpro-write-check-*")
+	if err != nil {
+		return fmt.Errorf("open backup directory write check: %w", err)
+	}
+	probePath := probe.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = probe.Close()
+			_ = os.Remove(probePath)
+		}
+	}()
+	if _, err := probe.WriteString("ok\n"); err != nil {
+		return fmt.Errorf("write backup directory check: %w", err)
+	}
+	if err := probe.Sync(); err != nil {
+		return fmt.Errorf("sync backup directory check: %w", err)
+	}
+	if err := probe.Close(); err != nil {
+		return fmt.Errorf("close backup directory check: %w", err)
+	}
+	if err := os.Remove(probePath); err != nil {
+		return fmt.Errorf("remove backup directory check: %w", err)
+	}
+	cleanup = false
+	s.backupDirectoryOverride = directory
+	return nil
+}
+
 func (s *Store) backupDirectory(ctx context.Context, livePath string) (string, error) {
+	if s.backupDirectoryOverride != "" {
+		return s.backupDirectoryOverride, nil
+	}
 	settings, err := s.LoadRuntimeSettings(ctx)
 	if err != nil {
 		return "", err

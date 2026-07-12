@@ -1,0 +1,24 @@
+{$KEKEIO_DOMAIN} {
+	@management_root {
+		remote_ip {$KEKEIO_ADMIN_NETWORKS}
+		path /
+	}
+
+	@management {
+		remote_ip {$KEKEIO_ADMIN_NETWORKS}
+		path /admin /admin/* /install /install/* /api/admin/*
+	}
+
+	@public path /api/v1/* /account/verify /account/reset /account/assets/* /health/live /health/ready
+	@public_root path /
+
+	route {
+		redir @management_root /admin 302
+		reverse_proxy @public_root backend:8881 {
+			rewrite /health/live
+		}
+		reverse_proxy @management backend:8881
+		reverse_proxy @public backend:8881
+		respond 404
+	}
+}

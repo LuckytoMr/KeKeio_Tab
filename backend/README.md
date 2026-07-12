@@ -2,126 +2,125 @@
 
 KeKeIO Tab 的单机自托管后端，提供邮箱验证账号、`SharedProfile v2` 配置同步、资源目录和局域网运维工作台。SQLite 是唯一数据源；本地图片、图标 Blob、第三方凭据和设备运行状态不会上传。
 
-## 本地快速测试
+## Docker 正式部署
 
-本机调试不需要配置环境变量或走安装向导：
+正式后端统一监听容器端口 `8881`，并由 HTTPS 反向代理提供 `https://tab.kekeio.com`。仓库提供可直接运行的路由器部署包：
 
-```powershell
-cd .\backend
-go run ./cmd/fullpro-server dev
+- [完整路由器部署指南](deploy/router/README.md)
+- [Docker Compose](deploy/router/compose.yaml)
+- [Caddyfile](deploy/router/Caddyfile)
+- [环境变量样例](deploy/router/router.env.example)
+
+```sh
+# Git 仓库中：cd backend/deploy/router
+# 后端 Release ZIP 解压后：cd deploy/router
+cp router.env.example .env
+# 先填写 KEKEIO_IMAGE，再编辑持久目录、LAN CIDR 和 Docker 网段
+docker compose --env-file .env -f compose.yaml pull
+docker compose --env-file .env -f compose.yaml up -d
 ```
 
-该命令固定监听 `127.0.0.1:8787`，首次运行会在 `.dev-data` 下生成独立的数据库和 secrets，并自动创建管理员账号 `admin@local.test` 与插件账号 `user@local.test`；两者密码固定为 `2231`。下次 `dev` 启动会自动将旧的本地测试账号重置为这个密码。后台入口是 `http://127.0.0.1:8787/admin`。正式扩展固定连接 `https://tab.kekeio.com`，本地 `dev` 模式用于快速验证后台与 API；端到端扩展同步需由该域名的 HTTPS 代理转发到后端。
-
-快捷模式仅允许 loopback 连接，并且仅在此模式下为格式正确的 Chrome 扩展 Origin 自动放行 CORS。它不会使用生产启动与安装配置，也不会使用 `data/`，不能用于 Docker 或正式部署。需要重新生成本地数据时，先停止该进程，再删除 `.dev-data` 后重新执行命令。
-
-## 首次启动
-
-```powershell
-cd .\backend
-go run ./cmd/fullpro-server
-```
-
-首次启动会生成 128-bit 一次性安装码，并同时输出到日志及数据目录下权限受限的 `install-code` 文件。随后在服务器本机打开：
+默认链路为：
 
 ```text
-http://127.0.0.1:8787/install
+https://tab.kekeio.com:443 -> WAN 443 -> host 8443 -> Caddy 443 -> backend:8881
 ```
 
-安装向导会完成环境检查、独立管理员创建、公网 API、扩展来源、SMTP、配额及保留策略配置。系统没有默认管理员账号或固定密码；安装完成后一次性安装码会失效并删除。
+公网域名没有端口后缀。DNS 只解析 IP；外部 `80/443` 到内部 `8080/8443` 的转换由路由器 NAT 完成，Caddy 再把 HTTP 请求转到 `backend:8881`。不要把 WAN `8881` 直接映射给 Go 后端。
 
-后台入口：
+镜像以 UID/GID `10001` 非 root 用户运行。使用宿主机目录前必须预创建 `/data` 与 `/backups` 对应路径并 `chown 10001:10001`；优先使用 ext4 等支持 SQLite 锁、WAL、原子 rename 和 Unix 权限的本地文件系统。Docker 启动时会验证 `/backups` 可写并执行 `fsync`，失败直接退出。同一磁盘上的两个目录只提供逻辑隔离；灾备仍需第二介质或离机复制。
 
-```text
-http://127.0.0.1:8787/admin
+### 首次安装
+
+首次启动会生成 128-bit 一次性安装码，同时输出到容器日志并写入 `/data/install-code`：
+
+```sh
+docker compose --env-file .env -f compose.yaml logs backend
 ```
 
-除严格 loopback 开发访问外，后台和安装页必须经 HTTPS 访问，并且只接受 `FULLPRO_ADMIN_ALLOWED_CIDRS` 允许的网络。公网只应暴露 `/api/v1/*` 插件 API。
-
-## 环境变量
+在允许的局域网中打开：
 
 ```text
-FULLPRO_ADDR=:8787
+https://tab.kekeio.com/install
+```
+
+安装向导会完成环境检查、独立管理员创建、公网 API、精确扩展来源、SMTP、配额及保留策略配置。公网 URL 填 `https://tab.kekeio.com`，不要追加 `:8881` 或 `:8443`；备份目录填 `/backups`。系统没有默认管理员账号或固定生产密码，安装完成后一次性安装码会失效并删除。
+
+后台入口是 `https://tab.kekeio.com/admin`。Caddy 只允许 `.env` 中配置的精确 LAN/VLAN 来源访问 `/admin*`、`/install*` 和 `/api/admin/*`；后端还会再次执行管理员 CIDR 与 HTTPS 校验。部署后必须从真正的外网确认这些路径返回 404，任一验证失败都必须停止上线。若路由器把 WAN 来源 SNAT 成允许的 LAN 地址，应改用路由器防火墙、仅 LAN/VPN 管理入口，不能只依赖 Caddy matcher。
+
+### 路由器端口与 IPv4/IPv6
+
+- Docker 主机 `80/443` 未占用时，Caddy 可直接发布标准端口。
+- 路由器管理页面占用 `80/443` 时，默认让 Caddy 发布 `8080/8443`，再配置外部 TCP `80→8080`、TCP `443→8443`；UDP `443→8443` 仅用于可选 HTTP/3。
+- Docker 位于独立 LAN 主机时，普通端口转发的内部 IP 填该主机地址。Docker 就在路由器本机时，可能需要本机 DNAT/redirect；部分家用路由器的“转发到内网设备”页面不能选择路由器自身。
+- LAN 访问公网域名需要 NAT loopback。使用 split DNS 时，若域名指向独立 Docker 主机，该主机必须直接监听 `80/443`；若保留 `8080/8443`，域名应指向能在 LAN 侧继续执行 `80/443→8080/8443` 重定向的路由器地址。
+- IPv6 通常不做 NAT。只有外部标准 TCP `443` 确实能到达 Caddy 时才发布 AAAA；否则部分客户端会优先 IPv6 后失败。
+- A 与 AAAA 必须到达同一套反向代理规则。任意一条链路未完成时不要发布对应记录。
+
+### 反向代理路径与可信代理
+
+公网只允许：
+
+```text
+/
+/api/v1/*
+/account/verify
+/account/reset
+/account/assets/*
+/health/live
+/health/ready
+```
+
+`/account/assets/*` 是邮箱验证与密码重置页面所需的 CSS/JS，遗漏会让账号流程失效。未匹配路径统一返回 404。
+
+默认 Compose 不发布后端宿主端口。现有代理在另一个容器中时应加入同一 Docker 网络并使用 `backend:8881`；宿主机代理必须显式叠加 `compose.host-proxy.yaml` 才能使用 `127.0.0.1:8881`。只有直接对端位于 `FULLPRO_TRUSTED_PROXIES` 时后端才读取 `X-Forwarded-For`/`X-Forwarded-Proto`，因此 `KEKEIO_TRUSTED_PROXIES` 必须收窄到代理容器 IP 或实际 bridge gateway `/32`，不能照抄任意私网段。完整命令与旧版 Docker 的 localhost 发布风险见路由器部署指南。
+
+## 生产环境变量
+
+```text
+FULLPRO_ADDR=:8881
 FULLPRO_DB=/data/fullpro.db
+FULLPRO_BACKUP_DIRECTORY=/backups
 FULLPRO_SECRETS_FILE=/data/secrets.json
 FULLPRO_INSTALL_CODE_FILE=/data/install-code
 FULLPRO_INSTALL_CODE=<可选的显式一次性安装码>
 FULLPRO_COOKIE_NAME=fullpro_session
 FULLPRO_INSTALL_COOKIE_NAME=fullpro_install
 FULLPRO_COOKIE_SECURE=true
-FULLPRO_ADMIN_ALLOWED_CIDRS=127.0.0.1/32,::1/128,192.168.0.0/16
-FULLPRO_TRUSTED_PROXIES=127.0.0.1/32,::1/128
+FULLPRO_PUBLIC_BASE_URL=https://tab.kekeio.com
+FULLPRO_ADMIN_ALLOWED_CIDRS=127.0.0.1/32,::1/128,192.168.50.0/24
+FULLPRO_TRUSTED_PROXIES=<Caddy容器IP>/32
 FULLPRO_AUTH_RATE_LIMIT=20
 FULLPRO_AUTH_RATE_WINDOW_SECONDS=60
 FULLPRO_PASSWORD_HASH_CONCURRENCY=2
-FULLPRO_HEALTHCHECK_URL=http://127.0.0.1:8787/health/ready
+FULLPRO_HEALTHCHECK_URL=http://127.0.0.1:8881/health/live
 ```
 
-`FULLPRO_PASSWORD_HASH_CONCURRENCY` 限制进程内 Argon2id 创建与校验的并发数，默认 `2`、允许 `1..16`；在内存受限设备上保持较小值，避免并发登录或注册耗尽内存。
+`FULLPRO_BACKUP_DIRECTORY` 是启动时强制覆盖项，优先级高于安装向导保存的备份目录；后端会在开始监听前验证该目录可写并执行 `fsync`。Docker 正式部署应保持为 `/backups`，不要再通过向导改到容器外不可见的宿主路径。
 
-安装向导保存的公网 URL、精确扩展/Web Origin 白名单、注册开关、SMTP、配额和保留策略会在安装完成后立即生效，并在重启时自动加载。以下环境变量仅用于显式覆盖持久化运行配置：
+`FULLPRO_PASSWORD_HASH_CONCURRENCY` 限制进程内 Argon2id 创建与校验的并发数，默认 `2`、允许 `1..16`；在内存受限路由器上保持较小值。
+
+安装向导保存的公网 URL、精确扩展/Web Origin、注册开关、SMTP、配额和保留策略会持久化。只有需要在每次启动强制覆盖数据库值时才设置：
 
 ```text
-FULLPRO_PUBLIC_BASE_URL=https://tab.kekeio.com
 FULLPRO_REGISTRATION_OPEN=true
 FULLPRO_API_ALLOWED_ORIGINS=chrome-extension://<扩展ID>,https://app.example.com
 ```
 
-Origin 必须精确匹配；后端不会默认放行任意 `chrome-extension://` 来源。只有直接对端位于 `FULLPRO_TRUSTED_PROXIES` 时才读取转发头，配置反向代理时应同时传递可信的 `X-Forwarded-Proto` 和 `X-Forwarded-For`。
+Origin 必须精确匹配；后端不会默认放行任意 `chrome-extension://` 来源。设置 `FULLPRO_API_ALLOWED_ORIGINS` 会替换安装向导保存的来源列表，正常生产部署应留空并通过向导管理。
 
-## 管理员本地恢复
+## 管理员恢复
 
-管理员密码遗失时，在服务器本机停止服务后执行：
+管理员密码遗失时，停止后端后在相同数据卷上运行恢复命令：
 
-```powershell
-go run ./cmd/fullpro-server admin-reset
+```sh
+docker compose --env-file .env -f compose.yaml stop backend
+docker compose --env-file .env -f compose.yaml rm -f backend
+docker compose --env-file .env -f compose.yaml run --rm --no-deps backend fullpro-server admin-reset
+docker compose --env-file .env -f compose.yaml up -d backend
 ```
 
-该命令会撤销现有管理员会话、记录本地恢复审计、将安装入口切换为仅管理员重置模式，并生成新的 128-bit 一次性恢复码。使用日志或 `FULLPRO_INSTALL_CODE_FILE` 中的恢复码完成向导；不会重新开放全新安装，也不会删除用户数据。
-
-## Docker
-
-```bash
-docker buildx build --platform linux/arm64 -t kekeio-tab:latest .
-docker run -d \
-  --name kekeio-tab \
-  --restart unless-stopped \
-  -p 127.0.0.1:8787:8787 \
-  -v /mnt/usb-24aeefbb/kekeio-tab:/data \
-  -e FULLPRO_ADDR=:8787 \
-  -e FULLPRO_DB=/data/fullpro.db \
-  -e FULLPRO_COOKIE_SECURE=true \
-  -e FULLPRO_PUBLIC_BASE_URL=https://tab.kekeio.com \
-  kekeio-tab:latest
-```
-
-建议由 Caddy 或 Nginx 终止 HTTPS。不要把 `/admin`、`/install` 或 `/api/admin/v1/*` 暴露到公网。
-
-以下是同机 Caddy 的最小公网配置。`route` 保证未匹配插件 API 或健康端点的请求直接返回 404；Caddy 会自动设置 `X-Forwarded-For` 和 `X-Forwarded-Proto`：
-
-```caddyfile
-tab.kekeio.com {
-  route {
-    @public path /api/v1/* /account/verify /account/reset /health/live /health/ready
-    reverse_proxy @public 127.0.0.1:8787
-    respond 404
-  }
-}
-```
-
-### 路由器 DDNS 与 IPv4/IPv6
-
-`ddns-go` 中可同时为 `tab.kekeio.com` 更新 A 和 AAAA。发布双栈记录时，两条链路必须同时可用：
-
-- IPv4：把公网 TCP 443 端口转发到运行 Caddy/Nginx 的设备。
-- IPv6：通常不做 NAT，但必须在路由器防火墙中放行到反向代理设备的 TCP 443；AAAA 应使用可公网路由的 IPv6 地址，而不是 `fc00::/7` ULA 地址。
-- A 与 AAAA 必须到达同一套反向代理规则。任意一条记录失效，都可能导致部分客户端连接失败或证书签发失败。
-- 反向代理负责 `tab.kekeio.com` 的有效公网证书。可开放 TCP 80/443 使用自动 ACME，或在只开放 443 时使用受支持的 TLS-ALPN/DNS 验证方案。
-- 若反向代理运行在另一个 Docker 容器中，`127.0.0.1:8787` 指向的是代理容器自身；应把两个容器加入同一网络并使用后端服务名和 `8787` 端口。
-
-公网只转发上述插件 API、账号验证/重置页和健康端点，继续阻断 `/admin`、`/install` 与 `/api/admin/v1/*`。在无图形界面的路由器上可通过 SSH 隧道进入本机安装/管理入口，例如 `ssh -L 8787:127.0.0.1:8787 root@<路由器地址>`，然后在电脑打开 `http://127.0.0.1:8787/install`。
-
-同机代理应配置 `FULLPRO_TRUSTED_PROXIES=127.0.0.1/32,::1/128`。若 Caddy 位于容器网络或另一台主机，只加入其实际、受控的源地址或最小 CIDR，不要信任任意代理来源。
+删除停止状态的容器是为了释放固定的 Docker IP，不会删除 bind mount 数据。恢复命令会撤销现有管理员会话、记录本地恢复审计、将安装入口切换为仅管理员重置模式，并生成新的一次性恢复码；不会删除用户数据。继续通过局域网 HTTPS 安装入口完成重置。
 
 ## 健康检查
 
@@ -133,7 +132,11 @@ GET /healthz       # /health/live 的兼容别名
 
 `/health/live` 和 `/healthz` 正常时返回 `200 {"status":"ok"}`。`/health/ready` 仅在数据库可查询、migration 与当前程序完全匹配、安装状态为 `installed`，且没有 `running` 维护任务或 `restoring` 备份时返回 `200 {"status":"ready"}`。失败返回 503，`reason` 只会是 `database`、`schema`、`installation` 或 `maintenance`，不会暴露内部错误。健康请求不会写入 HTTP 访问日志，所有响应均禁止缓存。
 
-Docker 镜像默认用 `/health/ready` 作为 `HEALTHCHECK`。首次安装完成前、维护任务运行中或备份恢复排队后显示 `unhealthy` 是预期的部署门禁；此时可用 `/health/live` 区分“进程仍存活”和“尚不可接流量”。覆盖 `FULLPRO_ADDR` 的端口时，也要把 `FULLPRO_HEALTHCHECK_URL` 改为容器内可访问的新地址。
+Docker 镜像默认用 `/health/live` 作为 `HEALTHCHECK`，因此首次安装和维护期间仍能正确表示进程存活；启动前还会单独验证备份目录可写。外部监控或编排系统应使用 `/health/ready` 判断是否可以接收业务流量。若覆盖 `FULLPRO_ADDR`，必须同步覆盖 `FULLPRO_HEALTHCHECK_URL`。
+
+## 非生产本地模式
+
+`go run ./cmd/fullpro-server dev` 仍固定监听 `127.0.0.1:8787`，使用隔离的 `.dev-data` 和固定测试账号，仅供本地开发调试。它不会使用生产安装配置或 `/data`，不能用于 Docker 或正式部署。
 
 ## 备份、升级与回滚
 

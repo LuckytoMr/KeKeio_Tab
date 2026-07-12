@@ -206,6 +206,31 @@ func TestBackupSchedulerRunsImmediatelyAndStopsOnCancellation(t *testing.T) {
 	}
 }
 
+func TestBackupDirectoryOverrideTakesPrecedence(t *testing.T) {
+	databasePath := filepath.Join(t.TempDir(), "data", "fullpro.db")
+	store, err := OpenStore(databasePath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	setBackupDirectoryForTest(t, store, filepath.Join(t.TempDir(), "persisted-backups"))
+
+	if err := store.SetBackupDirectoryOverride("relative-backups"); err == nil {
+		t.Fatal("expected relative backup directory override to fail")
+	}
+	override := filepath.Join(t.TempDir(), "docker-backups")
+	if err := store.SetBackupDirectoryOverride(override); err != nil {
+		t.Fatalf("set backup directory override: %v", err)
+	}
+	got, err := store.backupDirectory(t.Context(), databasePath)
+	if err != nil {
+		t.Fatalf("resolve backup directory: %v", err)
+	}
+	if got != filepath.Clean(override) {
+		t.Fatalf("backup directory=%q want %q", got, filepath.Clean(override))
+	}
+}
+
 func setBackupDirectoryForTest(t *testing.T, store *Store, directory string) {
 	t.Helper()
 	limits, err := json.Marshal(map[string]any{"backupDirectory": directory})

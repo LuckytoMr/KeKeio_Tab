@@ -1,0 +1,4 @@
+services:
+  backend:
+    ports:
+      - "${KEKEIO_BACKEND_BIND:-127.0.0.1}:${KEKEIO_BACKEND_PORT:-8881}:8881/tcp"

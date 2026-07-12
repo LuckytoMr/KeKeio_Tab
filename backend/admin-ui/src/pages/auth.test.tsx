@@ -118,7 +118,7 @@ describe("InstallWizard", () => {
       adminEmail: "admin@example.com", displayName: "管理员", password: "", passwordConfirm: "",
       publicBaseUrl: "", extensionIds: "extension-id", webOrigins: "", registrationEnabled: false,
       smtpHost: "", smtpPort: "587", smtpTls: "starttls", smtpFrom: "", smtpUser: "", smtpPassword: "",
-      maxUsers: "100", profileKiB: "512", storageGiB: "1", versionsPerUser: "50", accessLogDays: "30", auditLogDays: "180", backupDirectory: "/data/backups"
+      maxUsers: "100", profileKiB: "512", storageGiB: "1", versionsPerUser: "50", accessLogDays: "30", auditLogDays: "180", backupDirectory: "/backups"
     }, 0));
     const client = clientStub({
       get: vi.fn().mockResolvedValue({ state: "uninitialized", mode: "fresh_install", requiresCode: true })
@@ -146,7 +146,7 @@ describe("InstallWizard", () => {
       adminEmail: "admin@example.com", displayName: "管理员", password: "abcdefghijkl", passwordConfirm: "abcdefghijkl",
       publicBaseUrl: "", extensionIds: "extension-id", webOrigins: "", registrationEnabled: false,
       smtpHost: "", smtpPort: "587", smtpTls: "starttls", smtpFrom: "", smtpUser: "", smtpPassword: "",
-      maxUsers: "100", profileKiB: "512", storageGiB: "1", versionsPerUser: "50", accessLogDays: "30", auditLogDays: "180", backupDirectory: "/data/backups"
+      maxUsers: "100", profileKiB: "512", storageGiB: "1", versionsPerUser: "50", accessLogDays: "30", auditLogDays: "180", backupDirectory: "/backups"
     }, 0)).draft;
 
     expect(validateInstallStepInput("公网 API", draft, "fresh_install", false, true)).toEqual({
@@ -178,7 +178,7 @@ describe("InstallWizard", () => {
         versionsPerUser: "50",
         accessLogDays: "30",
         auditLogDays: "180",
-        backupDirectory: "/data/backups"
+        backupDirectory: "/backups"
       },
       4
     );
@@ -218,7 +218,7 @@ describe("InstallWizard", () => {
       adminEmail: "admin@example.com", displayName: "管理员", password: "", passwordConfirm: "",
       publicBaseUrl: "https://fullpro.example.com", extensionIds: "extension-id", webOrigins: "", registrationEnabled: false,
       smtpHost: "smtp.example.com", smtpPort: "587", smtpTls: "starttls", smtpFrom: "admin@example.com", smtpUser: "mailer", smtpPassword: "",
-      maxUsers: "100", profileKiB: "512", storageGiB: "1", versionsPerUser: "50", accessLogDays: "30", auditLogDays: "180", backupDirectory: "/data/backups"
+      maxUsers: "100", profileKiB: "512", storageGiB: "1", versionsPerUser: "50", accessLogDays: "30", auditLogDays: "180", backupDirectory: "/backups"
     }, 5));
     const client = clientStub({
       get: vi.fn().mockResolvedValue({ state: "uninitialized", mode: "fresh_install", requiresCode: true }),
@@ -262,7 +262,7 @@ describe("InstallWizard", () => {
       adminEmail: "admin@example.com", displayName: "管理员", password: "", passwordConfirm: "",
       publicBaseUrl: "https://tab.kekeio.com", extensionIds: "extension-id", webOrigins: "", registrationEnabled: true,
       smtpHost: "smtp.custom.example", smtpPort: "2525", smtpTls: "starttls", smtpFrom: "sender@example.com", smtpUser: "sender-account", smtpPassword: "",
-      maxUsers: "100", profileKiB: "512", storageGiB: "1", versionsPerUser: "50", accessLogDays: "30", auditLogDays: "180", backupDirectory: "/data/backups"
+      maxUsers: "100", profileKiB: "512", storageGiB: "1", versionsPerUser: "50", accessLogDays: "30", auditLogDays: "180", backupDirectory: "/backups"
     }, 0));
     const post = vi.fn().mockImplementation((path: string) => {
       if (path === "/install/api/v1/session") return Promise.resolve({ mode: "fresh_install", csrfToken: "csrf-install" });
@@ -304,7 +304,7 @@ describe("InstallWizard", () => {
       adminEmail: "admin@example.com", displayName: "管理员", password: "", passwordConfirm: "",
       publicBaseUrl: "https://tab.kekeio.com", extensionIds: "extension-id", webOrigins: "", registrationEnabled: true,
       smtpHost: "smtp.custom.example", smtpPort: "2525", smtpTls: "starttls", smtpFrom: "sender@example.com", smtpUser: "sender-account", smtpPassword: "",
-      maxUsers: "100", profileKiB: "512", storageGiB: "1", versionsPerUser: "50", accessLogDays: "30", auditLogDays: "180", backupDirectory: "/data/backups"
+      maxUsers: "100", profileKiB: "512", storageGiB: "1", versionsPerUser: "50", accessLogDays: "30", auditLogDays: "180", backupDirectory: "/backups"
     }, 0));
     let resolveSMTPTest!: (value: { verified: true }) => void;
     const delayedSMTPTest = new Promise<{ verified: true }>((resolve) => { resolveSMTPTest = resolve; });
@@ -345,7 +345,7 @@ describe("InstallWizard", () => {
       adminEmail: "admin@example.com", displayName: "管理员", password: "", passwordConfirm: "",
       publicBaseUrl: "https://fullpro.example.com", extensionIds: "extension-id", webOrigins: "", registrationEnabled: true,
       smtpHost: "smtp.example.com", smtpPort: "587", smtpTls: "starttls", smtpFrom: "admin@example.com", smtpUser: "", smtpPassword: "",
-      maxUsers: "100", profileKiB: "512", storageGiB: "1", versionsPerUser: "50", accessLogDays: "30", auditLogDays: "180", backupDirectory: "/data/backups"
+      maxUsers: "100", profileKiB: "512", storageGiB: "1", versionsPerUser: "50", accessLogDays: "30", auditLogDays: "180", backupDirectory: "/backups"
     }, 0));
     const post = vi.fn().mockImplementation((path: string) => {
       if (path === "/install/api/v1/session") return Promise.resolve({ mode: "fresh_install", csrfToken: "csrf-install" });

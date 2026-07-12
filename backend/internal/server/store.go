@@ -32,9 +32,10 @@ var (
 )
 
 type Store struct {
-	db            *sql.DB
-	backupMu      sync.Mutex
-	maintenanceMu sync.Mutex
+	db                      *sql.DB
+	backupDirectoryOverride string
+	backupMu                sync.Mutex
+	maintenanceMu           sync.Mutex
 }
 
 func OpenStore(path string) (*Store, error) {

@@ -1,0 +1,83 @@
+name: kekeio-tab
+
+services:
+  backend:
+    image: "${KEKEIO_IMAGE:?Set KEKEIO_IMAGE to a release or sha tag in the deployment .env file}"
+    container_name: kekeio-tab-backend
+    restart: unless-stopped
+    stop_grace_period: 30s
+    environment:
+      FULLPRO_ADDR: ":8881"
+      FULLPRO_DB: "/data/fullpro.db"
+      FULLPRO_BACKUP_DIRECTORY: "/backups"
+      FULLPRO_COOKIE_SECURE: "true"
+      FULLPRO_PUBLIC_BASE_URL: "https://${KEKEIO_DOMAIN:?Set KEKEIO_DOMAIN in the deployment .env file}"
+      FULLPRO_HEALTHCHECK_URL: "http://127.0.0.1:8881/health/live"
+      FULLPRO_ADMIN_ALLOWED_CIDRS: "${KEKEIO_ADMIN_ALLOWED_CIDRS:?Set the exact administrator CIDRs in the deployment .env file}"
+      FULLPRO_TRUSTED_PROXIES: "${KEKEIO_TRUSTED_PROXIES:?Set the exact Caddy container IP or CIDR in the deployment .env file}"
+    expose:
+      - "8881"
+    volumes:
+      - type: bind
+        source: "${KEKEIO_DATA_DIR:?Set KEKEIO_DATA_DIR in the deployment .env file}"
+        target: /data
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${KEKEIO_BACKUP_DIR:?Set KEKEIO_BACKUP_DIR in the deployment .env file}"
+        target: /backups
+        bind:
+          create_host_path: false
+    networks:
+      edge:
+        ipv4_address: "${KEKEIO_BACKEND_IP:-172.30.88.3}"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  caddy:
+    image: "${KEKEIO_CADDY_IMAGE:-caddy:2.11.4-alpine}"
+    container_name: kekeio-tab-caddy
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      KEKEIO_DOMAIN: "${KEKEIO_DOMAIN:?Set KEKEIO_DOMAIN in the deployment .env file}"
+      KEKEIO_ADMIN_NETWORKS: "${KEKEIO_ADMIN_NETWORKS:?Set the exact administrator source networks in the deployment .env file}"
+    ports:
+      - "${KEKEIO_HTTP_BIND:-0.0.0.0}:${KEKEIO_HTTP_PORT:-8080}:80/tcp"
+      - "${KEKEIO_HTTPS_BIND:-0.0.0.0}:${KEKEIO_HTTPS_PORT:-8443}:443/tcp"
+      - "${KEKEIO_HTTPS_BIND:-0.0.0.0}:${KEKEIO_HTTPS_PORT:-8443}:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      edge:
+        ipv4_address: "${KEKEIO_CADDY_IP:-172.30.88.2}"
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  edge:
+    name: kekeio-tab-edge
+    driver: bridge
+    ipam:
+      config:
+        - subnet: "${KEKEIO_DOCKER_SUBNET:-172.30.88.0/29}"
+
+volumes:
+  caddy-data:
+  caddy-config:

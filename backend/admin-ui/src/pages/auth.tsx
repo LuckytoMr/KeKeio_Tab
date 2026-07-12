@@ -129,7 +129,7 @@ const defaultDraft: InstallDraft = {
   versionsPerUser: "50",
   accessLogDays: "30",
   auditLogDays: "180",
-  backupDirectory: "/data/backups"
+  backupDirectory: "/backups"
 };
 
 const persistedKeys: Array<keyof InstallDraft> = [
@@ -469,7 +469,7 @@ function MailStep({ draft, patch, verified, busy, onTest }: { draft: InstallDraf
 
 function LimitsStep({ draft, patch }: { draft: InstallDraft; patch: PatchDraft }) {
   const fields: Array<[keyof InstallDraft, string, string]> = [["maxUsers", "最大用户数", "100"], ["profileKiB", "单配置上限（KiB）", "512"], ["storageGiB", "数据库软水位（GiB）", "1"], ["versionsPerUser", "每用户版本数", "50"], ["accessLogDays", "访问日志保留（天）", "30"], ["auditLogDays", "管理员审计保留（天）", "180"]];
-  return <section class="workflow-section form-section"><div class="form-grid two-columns">{fields.map(([key, label, placeholder]) => <div class="field-block" key={key}><label htmlFor={key}>{label}</label><input id={key} inputMode="numeric" placeholder={placeholder} value={String(draft[key])} onInput={(e) => patch(key, e.currentTarget.value as never)} /></div>)}</div><label htmlFor="backupDirectory">备份目录</label><input id="backupDirectory" value={draft.backupDirectory} onInput={(e) => patch("backupDirectory", e.currentTarget.value)} /><p class="field-help">达到软水位 90% 时停止新注册并告警；100% 时拒绝会增长存储的写入。</p></section>;
+  return <section class="workflow-section form-section"><div class="form-grid two-columns">{fields.map(([key, label, placeholder]) => <div class="field-block" key={key}><label htmlFor={key}>{label}</label><input id={key} inputMode="numeric" placeholder={placeholder} value={String(draft[key])} onInput={(e) => patch(key, e.currentTarget.value as never)} /></div>)}</div><label htmlFor="backupDirectory">备份目录</label><input id="backupDirectory" aria-describedby="backup-directory-help" value={draft.backupDirectory} onInput={(e) => patch("backupDirectory", e.currentTarget.value)} /><p id="backup-directory-help" class="field-help">Docker 正式部署请保持 `/backups`；启动环境变量会覆盖此处的持久值并验证目录可写。</p><p class="field-help">达到软水位 90% 时停止新注册并告警；100% 时拒绝会增长存储的写入。</p></section>;
 }
 
 function ReviewStep({ draft, mode }: { draft: InstallDraft; mode: InstallSession["mode"] }) {

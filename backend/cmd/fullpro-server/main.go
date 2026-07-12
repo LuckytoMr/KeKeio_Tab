@@ -35,7 +35,7 @@ func main() {
 		}
 		return
 	}
-	addr := env("FULLPRO_ADDR", ":8787")
+	addr := env("FULLPRO_ADDR", ":8881")
 	dbPath := env("FULLPRO_DB", "data/fullpro.db")
 	dataDir := filepath.Dir(dbPath)
 	secretsPath := env("FULLPRO_SECRETS_FILE", filepath.Join(dataDir, "secrets.json"))
@@ -49,6 +49,9 @@ func main() {
 		log.Fatalf("open database: %v", err)
 	}
 	defer store.Close()
+	if err := store.SetBackupDirectoryOverride(os.Getenv("FULLPRO_BACKUP_DIRECTORY")); err != nil {
+		log.Fatalf("configure backup directory: %v", err)
+	}
 	state, err := store.InstallationState(context.Background())
 	if err != nil {
 		log.Fatalf("read installation state: %v", err)
