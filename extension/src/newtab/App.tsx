@@ -27,11 +27,11 @@ import {
   deleteShortcut,
   deleteShortcutGroup,
   getWallpaperKey,
+  moveShortcut,
   renameShortcutGroup,
   removeWallpaperFromSelection,
   setProfileWallpaper,
   swapShortcutGroupOrder,
-  swapShortcutOrder,
   upsertShortcut
 } from "../shared/profile/mutations";
 import type { Profile, SearchEngine, Shortcut, ShortcutInput } from "../shared/profile/types";
@@ -146,9 +146,14 @@ type WallpaperMenuState = {
 
 type ShortcutDragState = {
   shortcut: Shortcut;
+  startX: number;
+  startY: number;
   x: number;
   y: number;
+  hasMoved: boolean;
+  editMode: boolean;
   targetId?: string;
+  targetGroupId: string;
 };
 
 type ShortcutPressState = {
@@ -165,6 +170,12 @@ const emptyForm = (groupId: string): ShortcutForm => ({
   iconText: "",
   iconUrl: ""
 });
+
+const shortcutIconModeOptions: ReadonlyArray<{ value: ShortcutIconMode; label: string }> = [
+  { value: "auto", label: "自动获取" },
+  { value: "text", label: "文字" },
+  { value: "url", label: "图片链接" }
+];
 
 function getSearchUrl(profile: Profile, query: string) {
   const engine =
@@ -429,6 +440,7 @@ export function App() {
   const [shortcutMenu, setShortcutMenu] = useState<ShortcutMenuState | null>(null);
   const [wallpaperMenu, setWallpaperMenu] = useState<WallpaperMenuState | null>(null);
   const [shortcutDrag, setShortcutDrag] = useState<ShortcutDragState | null>(null);
+  const [shortcutEditMode, setShortcutEditMode] = useState(false);
   const [groupSwitcherVisible, setGroupSwitcherVisible] = useState(false);
   const [searchEngineMenuOpen, setSearchEngineMenuOpen] = useState(false);
   const [localWallpapers, setLocalWallpapers] = useState<LocalWallpaperView[]>([]);
@@ -711,11 +723,16 @@ export function App() {
         const target = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null;
         const targetTile = target?.closest<HTMLElement>("[data-shortcut-id]");
         const targetId = targetTile?.dataset.shortcutId;
+        const targetShortcut = targetId
+          ? profileRef.current.shortcuts.find((shortcut) => shortcut.id === targetId && !shortcut.deletedAt)
+          : undefined;
         const nextDrag = {
           ...drag,
           x: event.clientX,
           y: event.clientY,
-          targetId: targetId && targetId !== drag.shortcut.id ? targetId : undefined
+          hasMoved: drag.hasMoved || Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > 6,
+          targetId: targetId && targetId !== drag.shortcut.id ? targetId : undefined,
+          targetGroupId: targetShortcut?.groupId ?? drag.targetGroupId
         };
 
         event.preventDefault();
@@ -741,12 +758,25 @@ export function App() {
       const target = document.elementFromPoint(pointerX, pointerY) as HTMLElement | null;
       const targetTile = target?.closest<HTMLElement>("[data-shortcut-id]");
       const targetId = drag.targetId ?? targetTile?.dataset.shortcutId;
+      const targetShortcut = targetId
+        ? profileRef.current.shortcuts.find((shortcut) => shortcut.id === targetId && !shortcut.deletedAt)
+        : undefined;
+      const destinationGroupId = targetShortcut?.groupId ?? drag.targetGroupId;
 
       shortcutDragRef.current = null;
       setShortcutDrag(null);
-      if (targetId && targetId !== drag.shortcut.id) {
-        const next = swapShortcutOrder(profileRef.current, drag.shortcut.id, targetId);
-        void persist(next);
+      if (
+        (targetId && targetId !== drag.shortcut.id) ||
+        destinationGroupId !== drag.shortcut.groupId ||
+        (drag.editMode && drag.hasMoved && !targetId)
+      ) {
+        const next = moveShortcut(
+          profileRef.current,
+          drag.shortcut.id,
+          destinationGroupId,
+          targetId && targetId !== drag.shortcut.id ? targetId : undefined
+        );
+        if (next !== profileRef.current) void persist(next);
       }
 
       suppressShortcutClickRef.current = true;
@@ -1632,12 +1662,57 @@ export function App() {
     window.location.href = url;
   }
 
+  function finishShortcutEditMode() {
+    if (shortcutPressTimerRef.current !== null) {
+      window.clearTimeout(shortcutPressTimerRef.current);
+      shortcutPressTimerRef.current = null;
+    }
+    shortcutPressRef.current = null;
+    shortcutDragRef.current = null;
+    setShortcutDrag(null);
+    setShortcutEditMode(false);
+    setGroupSwitcherVisible(false);
+  }
+
+  function beginShortcutEditMode() {
+    setShortcutMenu(null);
+    setWallpaperMenu(null);
+    setSettingsOpen(false);
+    setShortcutForm(null);
+    setShortcutEditMode(true);
+    setGroupSwitcherVisible(true);
+  }
+
+  function beginShortcutDrag(shortcut: Shortcut, x: number, y: number) {
+    if (shortcutPressTimerRef.current !== null) {
+      window.clearTimeout(shortcutPressTimerRef.current);
+      shortcutPressTimerRef.current = null;
+    }
+    shortcutPressRef.current = null;
+    setShortcutMenu(null);
+    setWallpaperMenu(null);
+    const nextDrag = {
+      shortcut,
+      startX: x,
+      startY: y,
+      x,
+      y,
+      hasMoved: false,
+      editMode: shortcutEditMode,
+      targetGroupId: shortcut.groupId
+    };
+    shortcutDragRef.current = nextDrag;
+    setShortcutDrag(nextDrag);
+  }
+
   function openNewShortcut() {
+    finishShortcutEditMode();
     setShortcutForm(emptyForm(activeGroup?.id ?? profile.groups.find((group) => !group.deletedAt)!.id));
     setFormError("");
   }
 
   function openEditShortcut(shortcut: Shortcut) {
+    finishShortcutEditMode();
     setShortcutForm({
       id: shortcut.id,
       groupId: shortcut.groupId,
@@ -1676,8 +1751,8 @@ export function App() {
     event.preventDefault();
     setShortcutMenu(null);
     setWallpaperMenu({
-      left: Math.min(event.clientX, window.innerWidth - 180),
-      top: Math.min(event.clientY, window.innerHeight - 188)
+      left: Math.max(12, Math.min(event.clientX, window.innerWidth - 182)),
+      top: Math.max(12, Math.min(event.clientY, window.innerHeight - 236))
     });
   }
 
@@ -1702,6 +1777,12 @@ export function App() {
   function startShortcutPress(event: JSX.TargetedMouseEvent<HTMLElement>, shortcut: Shortcut) {
     if (event.button !== 0) return;
 
+    if (shortcutEditMode) {
+      event.preventDefault();
+      beginShortcutDrag(shortcut, event.clientX, event.clientY);
+      return;
+    }
+
     shortcutPressRef.current = {
       shortcut,
       startX: event.clientX,
@@ -1712,15 +1793,7 @@ export function App() {
       const press = shortcutPressRef.current;
       if (!press) return;
 
-      setShortcutMenu(null);
-      setWallpaperMenu(null);
-      const nextDrag = {
-        shortcut: press.shortcut,
-        x: press.startX,
-        y: press.startY
-      };
-      shortcutDragRef.current = nextDrag;
-      setShortcutDrag(nextDrag);
+      beginShortcutDrag(press.shortcut, press.startX, press.startY);
     }, 1000);
   }
 
@@ -1730,14 +1803,15 @@ export function App() {
 
     const nextDrag = {
       ...drag,
-      targetId: shortcut.id
+      targetId: shortcut.id,
+      targetGroupId: shortcut.groupId
     };
     shortcutDragRef.current = nextDrag;
     setShortcutDrag(nextDrag);
   }
 
   function maybeSuppressShortcutClick(event: JSX.TargetedMouseEvent<HTMLAnchorElement>) {
-    if (!suppressShortcutClickRef.current) return;
+    if (!shortcutEditMode && !suppressShortcutClickRef.current) return;
 
     event.preventDefault();
     event.stopPropagation();
@@ -1938,28 +2012,53 @@ export function App() {
 
   function switchGroupByOffset(offset: number) {
     if (!sortedGroups.length) return;
+    const drag = shortcutDragRef.current;
+    const currentGroupId = drag?.targetGroupId ?? activeGroup?.id;
     const currentIndex = Math.max(
       0,
-      sortedGroups.findIndex((group) => group.id === activeGroup?.id)
+      sortedGroups.findIndex((group) => group.id === currentGroupId)
     );
     const nextIndex = (currentIndex + offset + sortedGroups.length) % sortedGroups.length;
-    setActiveGroupId(sortedGroups[nextIndex].id);
+    const nextGroupId = sortedGroups[nextIndex].id;
+    setActiveGroupId(nextGroupId);
+    if (drag && shortcutEditMode) {
+      const nextDrag = {
+        ...drag,
+        targetId: undefined,
+        targetGroupId: nextGroupId
+      };
+      shortcutDragRef.current = nextDrag;
+      setShortcutDrag(nextDrag);
+    }
     revealGroupSwitcher();
   }
 
   function handleGroupWheel(event: JSX.TargetedWheelEvent<HTMLElement>) {
     const target = event.target as HTMLElement;
-    if (target.closest("input, textarea, select, .settings-panel, .modal-backdrop, .shortcut-context-menu, .wallpaper-context-menu")) return;
-    if (shortcutDrag) return;
+    if (target.closest("input, textarea, select, .settings-panel, .modal-backdrop, .shortcut-context-menu, .wallpaper-context-menu, .shortcut-edit-toolbar")) return;
+    if (shortcutDragRef.current && !shortcutEditMode) return;
     if (Math.abs(event.deltaY) < 10 || groupWheelLockedRef.current) return;
 
     event.preventDefault();
+    event.stopPropagation();
     groupWheelLockedRef.current = true;
     switchGroupByOffset(event.deltaY > 0 ? 1 : -1);
     window.setTimeout(() => {
       groupWheelLockedRef.current = false;
     }, 260);
   }
+
+  useEffect(() => {
+    if (!shortcutEditMode) return;
+
+    const finishOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      finishShortcutEditMode();
+    };
+    window.addEventListener("keydown", finishOnEscape);
+    return () => window.removeEventListener("keydown", finishOnEscape);
+  }, [shortcutEditMode]);
 
   async function setWallpaperSourceTab(tab: Profile["wallpaper"]["activeSourceTab"]) {
     await updateProfile((current) => ({
@@ -2060,7 +2159,7 @@ export function App() {
 
   return (
     <main
-      className={`newtab-root app-shell density-${profile.theme.density}`}
+      className={`newtab-root app-shell density-${profile.theme.density}${shortcutEditMode ? " shortcut-edit-mode" : ""}`}
       data-style-id={activeRemoteStyle?.id ?? "quark-flow"}
       style={appStyle}
       onWheel={handleGroupWheel}
@@ -2085,13 +2184,25 @@ export function App() {
           type="button"
           title="设置"
           aria-label="设置"
-          onClick={() => setSettingsOpen(true)}
+          onClick={() => {
+            finishShortcutEditMode();
+            setSettingsOpen(true);
+          }}
         >
           <Settings size={20} />
         </button>
       </aside>
 
       <section className="home-stage" aria-busy={!loaded}>
+        {shortcutEditMode ? (
+          <div className="shortcut-edit-toolbar" role="toolbar" aria-label="链接编辑工具栏">
+            <div>
+              <strong>编辑链接</strong>
+              <span>拖动排序 · 滚轮切换分组 · Esc 完成</span>
+            </div>
+            <button type="button" onClick={finishShortcutEditMode}>完成</button>
+          </div>
+        ) : null}
         <form className="search-box" ref={searchBoxRef} onSubmit={(event) => void submitSearch(event)}>
           <div className="search-engine-picker">
             <button
@@ -2135,7 +2246,7 @@ export function App() {
         </form>
 
         <nav
-          className={groupSwitcherVisible && !settingsOpen ? "group-scroll-rail visible" : "group-scroll-rail"}
+          className={(groupSwitcherVisible || shortcutEditMode) && !settingsOpen ? "group-scroll-rail visible" : "group-scroll-rail"}
           aria-label="滚轮切换分组"
           onWheel={handleGroupWheel}
         >
@@ -2145,7 +2256,7 @@ export function App() {
                 key={group.id}
                 type="button"
                 className={group.id === activeGroup?.id ? "active" : ""}
-                tabIndex={groupSwitcherVisible ? 0 : -1}
+                tabIndex={groupSwitcherVisible || shortcutEditMode ? 0 : -1}
                 title={group.title}
                 aria-label={group.title}
                 onClick={() => {
@@ -2158,12 +2269,17 @@ export function App() {
           <span className="group-scroll-label">{activeGroup?.title}</span>
         </nav>
 
-        <section className="shortcut-grid" aria-label={activeGroup?.title ?? "导航"}>
-          {visibleShortcuts.map((shortcut) => (
+        <section
+          className={shortcutEditMode ? "shortcut-grid is-editing" : "shortcut-grid"}
+          aria-label={`${activeGroup?.title ?? "导航"}${shortcutEditMode ? "，编辑中" : ""}`}
+        >
+          {visibleShortcuts.map((shortcut, index) => (
             <article
-              className={`shortcut-tile ${shortcutDrag?.targetId === shortcut.id ? "drop-target" : ""}`}
+              className={`shortcut-tile${shortcutDrag?.targetId === shortcut.id ? " drop-target" : ""}${shortcutDrag?.shortcut.id === shortcut.id ? " is-dragging" : ""}`}
               key={shortcut.id}
               data-shortcut-id={shortcut.id}
+              data-shortcut-group-id={shortcut.groupId}
+              style={{ "--shortcut-edit-delay": `${index * -37}ms` } as JSX.CSSProperties}
               onContextMenu={(event) => openShortcutMenu(event, shortcut)}
               onMouseDown={(event) => startShortcutPress(event, shortcut)}
               onMouseEnter={() => markShortcutDragTarget(shortcut)}
@@ -2172,7 +2288,7 @@ export function App() {
             >
               <a
                 href={shortcut.url}
-                aria-label={shortcut.title}
+                aria-label={shortcutEditMode ? `${shortcut.title}，可拖动排序` : shortcut.title}
                 data-tooltip={shortcut.title}
                 draggable={false}
                 onClick={maybeSuppressShortcutClick}
@@ -2224,7 +2340,7 @@ export function App() {
             }}
           >
             <Edit3 size={16} />
-            编辑
+            编辑链接
           </button>
           <button
             type="button"
@@ -2259,6 +2375,18 @@ export function App() {
           >
             添加图标
           </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              if (shortcutEditMode) finishShortcutEditMode();
+              else beginShortcutEditMode();
+              setWallpaperMenu(null);
+            }}
+          >
+            <Edit3 size={16} />
+            {shortcutEditMode ? "完成编辑" : "编辑布局"}
+          </button>
           <span className="menu-separator" aria-hidden="true" />
           <button
             type="button"
@@ -2275,6 +2403,7 @@ export function App() {
             type="button"
             role="menuitem"
             onClick={() => {
+              finishShortcutEditMode();
               setSettingsTab("wallpaper");
               setSettingsOpen(true);
               setWallpaperMenu(null);
@@ -3267,93 +3396,119 @@ export function App() {
                 <X size={20} />
               </button>
             </header>
-            <label>
-              <span>名称</span>
-              <input
-                value={shortcutForm.title}
-                onInput={(event) =>
-                  setShortcutForm((current) => (current ? { ...current, title: event.currentTarget.value } : current))
-                }
-                required
-              />
-            </label>
-            <label>
-              <span>地址</span>
-              <input
-                value={shortcutForm.url}
-                onInput={(event) =>
-                  setShortcutForm((current) => (current ? { ...current, url: event.currentTarget.value } : current))
-                }
-                required
-              />
-            </label>
-            <label>
-              <span>图标</span>
-              <select
-                value={shortcutForm.iconMode}
-                onChange={(event) =>
-                  setShortcutForm((current) =>
-                    current
-                      ? {
-                          ...current,
-                          iconMode: event.currentTarget.value as ShortcutIconMode,
-                          iconText: current.iconText || getShortcutInitial(current.title),
-                          iconUrl: current.iconUrl
-                        }
-                      : current
-                  )
-                }
-              >
-                <option value="auto">自动获取</option>
-                <option value="text">文字</option>
-                <option value="url">图片链接</option>
-              </select>
-            </label>
-            <label>
-              <span>分组</span>
-              <select
-                value={shortcutForm.groupId}
-                onChange={(event) =>
-                  setShortcutForm((current) => (current ? { ...current, groupId: event.currentTarget.value } : current))
-                }
-              >
-                {sortedGroups.map((group) => (
-                  <option key={group.id} value={group.id}>
-                    {group.title}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {shortcutForm.iconMode === "text" ? (
+            <div className="shortcut-form-body">
               <label>
-                <span>图标文字</span>
+                <span>名称</span>
                 <input
-                  value={shortcutForm.iconText}
-                  maxLength={3}
+                  value={shortcutForm.title}
+                  autoFocus
                   onInput={(event) =>
-                    setShortcutForm((current) =>
-                      current ? { ...current, iconText: event.currentTarget.value.toUpperCase() } : current
-                    )
-                  }
-                />
-              </label>
-            ) : null}
-            {shortcutForm.iconMode === "url" ? (
-              <label>
-                <span>图片链接</span>
-                <input
-                  value={shortcutForm.iconUrl}
-                  onInput={(event) =>
-                    setShortcutForm((current) => (current ? { ...current, iconUrl: event.currentTarget.value } : current))
+                    setShortcutForm((current) => (current ? { ...current, title: event.currentTarget.value } : current))
                   }
                   required
                 />
               </label>
-            ) : null}
-            {formError ? <p className="form-error">{formError}</p> : null}
-            <button className="command primary" type="submit">
-              保存
-            </button>
+              <label>
+                <span>地址</span>
+                <input
+                  value={shortcutForm.url}
+                  onInput={(event) =>
+                    setShortcutForm((current) => (current ? { ...current, url: event.currentTarget.value } : current))
+                  }
+                  required
+                />
+              </label>
+
+              <fieldset className="shortcut-choice-field">
+                <legend>图标</legend>
+                <div className="shortcut-choice-grid icon-mode-choices">
+                  {shortcutIconModeOptions.map((option) => (
+                    <label
+                      key={option.value}
+                      className={`shortcut-choice${shortcutForm.iconMode === option.value ? " active" : ""}`}
+                    >
+                      <input
+                        type="radio"
+                        name="shortcut-icon-mode"
+                        value={option.value}
+                        checked={shortcutForm.iconMode === option.value}
+                        onChange={() =>
+                          setShortcutForm((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  iconMode: option.value,
+                                  iconText: current.iconText || getShortcutInitial(current.title)
+                                }
+                              : current
+                          )
+                        }
+                      />
+                      <span>{option.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+
+              <fieldset className="shortcut-choice-field">
+                <legend>分组</legend>
+                <div className="shortcut-choice-grid group-choices">
+                  {sortedGroups.map((group) => (
+                    <label
+                      key={group.id}
+                      className={`shortcut-choice${shortcutForm.groupId === group.id ? " active" : ""}`}
+                    >
+                      <input
+                        type="radio"
+                        name="shortcut-group"
+                        value={group.id}
+                        checked={shortcutForm.groupId === group.id}
+                        onChange={() =>
+                          setShortcutForm((current) => (current ? { ...current, groupId: group.id } : current))
+                        }
+                      />
+                      <span>{group.title}</span>
+                    </label>
+                  ))}
+                </div>
+                {sortedGroups.length === 1 ? (
+                  <p className="shortcut-choice-hint">当前只有一个分组；可在“设置 → 分组”中新建。</p>
+                ) : null}
+              </fieldset>
+
+              {shortcutForm.iconMode === "text" ? (
+                <label>
+                  <span>图标文字</span>
+                  <input
+                    value={shortcutForm.iconText}
+                    maxLength={3}
+                    onInput={(event) =>
+                      setShortcutForm((current) =>
+                        current ? { ...current, iconText: event.currentTarget.value.toUpperCase() } : current
+                      )
+                    }
+                  />
+                </label>
+              ) : null}
+              {shortcutForm.iconMode === "url" ? (
+                <label>
+                  <span>图片链接</span>
+                  <input
+                    value={shortcutForm.iconUrl}
+                    onInput={(event) =>
+                      setShortcutForm((current) => (current ? { ...current, iconUrl: event.currentTarget.value } : current))
+                    }
+                    required
+                  />
+                </label>
+              ) : null}
+            </div>
+            <footer className="shortcut-form-actions">
+              {formError ? <p className="form-error">{formError}</p> : null}
+              <button className="command primary" type="submit">
+                保存
+              </button>
+            </footer>
           </form>
         </section>
       ) : null}

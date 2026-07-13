@@ -7,9 +7,11 @@ const now = () => new Date().toISOString();
 export function upsertShortcut(profile: Profile, input: ShortcutInput): Profile {
   const timestamp = now();
   const existing = input.id ? profile.shortcuts.find((shortcut) => shortcut.id === input.id) : undefined;
+  const movedToAnotherGroup = Boolean(existing && existing.groupId !== input.groupId);
   const activeInGroup = profile.shortcuts.filter(
     (shortcut) => shortcut.groupId === input.groupId && !shortcut.deletedAt
   );
+  const nextSortIndex = activeInGroup.reduce((max, shortcut) => Math.max(max, shortcut.sortIndex), -1) + 1;
 
   const nextShortcut: Shortcut = {
     id: existing?.id ?? input.id ?? `shortcut:${crypto.randomUUID()}`,
@@ -17,7 +19,7 @@ export function upsertShortcut(profile: Profile, input: ShortcutInput): Profile 
     title: input.title.trim(),
     url: normalizeShortcutUrl(input.url),
     icon: input.icon,
-    sortIndex: existing?.sortIndex ?? activeInGroup.length,
+    sortIndex: existing && !movedToAnotherGroup ? existing.sortIndex : nextSortIndex,
     createdAt: existing?.createdAt ?? timestamp,
     updatedAt: timestamp
   };
@@ -25,12 +27,98 @@ export function upsertShortcut(profile: Profile, input: ShortcutInput): Profile 
   const shortcuts = existing
     ? profile.shortcuts.map((shortcut) => (shortcut.id === existing.id ? nextShortcut : shortcut))
     : [...profile.shortcuts, nextShortcut];
+  const normalizedGroupIds = new Set([input.groupId, ...(movedToAnotherGroup && existing ? [existing.groupId] : [])]);
+  const normalizedSortIndexes = new Map<string, number>();
+  for (const groupId of normalizedGroupIds) {
+    shortcuts
+      .filter((shortcut) => shortcut.groupId === groupId && !shortcut.deletedAt)
+      .sort((left, right) => left.sortIndex - right.sortIndex || left.id.localeCompare(right.id))
+      .forEach((shortcut, sortIndex) => normalizedSortIndexes.set(shortcut.id, sortIndex));
+  }
+  const normalizedShortcuts = shortcuts.map((shortcut) => {
+    const sortIndex = normalizedSortIndexes.get(shortcut.id);
+    return sortIndex === undefined || sortIndex === shortcut.sortIndex
+      ? shortcut
+      : { ...shortcut, sortIndex, updatedAt: timestamp };
+  });
 
   return {
     ...profile,
     updatedAt: timestamp,
-    shortcuts
+    shortcuts: normalizedShortcuts
   };
+}
+
+export function moveShortcut(
+  profile: Profile,
+  shortcutId: string,
+  destinationGroupId: string,
+  targetShortcutId?: string
+): Profile {
+  const source = profile.shortcuts.find((shortcut) => shortcut.id === shortcutId && !shortcut.deletedAt);
+  const destinationGroup = profile.groups.find(
+    (group) => group.id === destinationGroupId && !group.deletedAt
+  );
+  if (!source || !destinationGroup) return profile;
+
+  const byOrder = (left: Shortcut, right: Shortcut) =>
+    left.sortIndex - right.sortIndex || left.id.localeCompare(right.id);
+  const sourceGroupShortcuts = profile.shortcuts
+    .filter((shortcut) => shortcut.groupId === source.groupId && !shortcut.deletedAt)
+    .sort(byOrder);
+  const destinationShortcuts = (source.groupId === destinationGroupId
+    ? sourceGroupShortcuts
+    : profile.shortcuts
+        .filter((shortcut) => shortcut.groupId === destinationGroupId && !shortcut.deletedAt)
+        .sort(byOrder)
+  ).filter((shortcut) => shortcut.id !== source.id);
+
+  const requestedIndex = targetShortcutId
+    ? destinationShortcuts.findIndex((shortcut) => shortcut.id === targetShortcutId)
+    : -1;
+  let insertionIndex = requestedIndex >= 0 ? requestedIndex : destinationShortcuts.length;
+  if (source.groupId === destinationGroupId && requestedIndex >= 0 && targetShortcutId) {
+    const sourceIndex = sourceGroupShortcuts.findIndex((shortcut) => shortcut.id === source.id);
+    const targetIndex = sourceGroupShortcuts.findIndex((shortcut) => shortcut.id === targetShortcutId);
+    if (sourceIndex >= 0 && targetIndex >= 0 && sourceIndex < targetIndex) insertionIndex += 1;
+  }
+  const reorderedDestination = [...destinationShortcuts];
+  reorderedDestination.splice(insertionIndex, 0, source);
+
+  const placements = new Map<string, { groupId: string; sortIndex: number }>();
+  if (source.groupId !== destinationGroupId) {
+    sourceGroupShortcuts
+      .filter((shortcut) => shortcut.id !== source.id)
+      .forEach((shortcut, sortIndex) => placements.set(shortcut.id, { groupId: source.groupId, sortIndex }));
+  }
+  reorderedDestination.forEach((shortcut, sortIndex) =>
+    placements.set(shortcut.id, { groupId: destinationGroupId, sortIndex })
+  );
+
+  const timestamp = now();
+  let changed = false;
+  const shortcuts = profile.shortcuts.map((shortcut) => {
+    const placement = placements.get(shortcut.id);
+    if (!placement || (shortcut.groupId === placement.groupId && shortcut.sortIndex === placement.sortIndex)) {
+      return shortcut;
+    }
+
+    changed = true;
+    return {
+      ...shortcut,
+      groupId: placement.groupId,
+      sortIndex: placement.sortIndex,
+      updatedAt: timestamp
+    };
+  });
+
+  return changed
+    ? {
+        ...profile,
+        updatedAt: timestamp,
+        shortcuts
+      }
+    : profile;
 }
 
 export function deleteShortcut(profile: Profile, shortcutId: string, deviceId: string): Profile {

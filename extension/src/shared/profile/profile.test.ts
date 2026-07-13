@@ -4,6 +4,7 @@ import {
   addShortcutGroup,
   deleteShortcut,
   deleteShortcutGroup,
+  moveShortcut,
   renameShortcutGroup,
   swapShortcutGroupOrder,
   swapShortcutOrder,
@@ -87,6 +88,128 @@ describe("profile mutations", () => {
 
     expect(updated.shortcuts.find((shortcut) => shortcut.id === first.id)?.sortIndex).toBe(second.sortIndex);
     expect(updated.shortcuts.find((shortcut) => shortcut.id === second.id)?.sortIndex).toBe(first.sortIndex);
+  });
+
+  it("inserts a shortcut before the hovered shortcut inside the same group", () => {
+    const profile = createDefaultProfile();
+    const updated = moveShortcut(profile, "shortcut:gmail", "group:media", "shortcut:github");
+    const orderedIds = updated.shortcuts
+      .filter((shortcut) => shortcut.groupId === "group:media" && !shortcut.deletedAt)
+      .sort((left, right) => left.sortIndex - right.sortIndex)
+      .map((shortcut) => shortcut.id);
+
+    expect(orderedIds).toEqual([
+      "shortcut:youtube",
+      "shortcut:gmail",
+      "shortcut:github",
+      "shortcut:cloudflare",
+      "shortcut:google"
+    ]);
+    expect(
+      updated.shortcuts
+        .filter((shortcut) => shortcut.groupId === "group:media" && !shortcut.deletedAt)
+        .map((shortcut) => shortcut.sortIndex)
+        .sort((left, right) => left - right)
+    ).toEqual([0, 1, 2, 3, 4]);
+  });
+
+  it("moves a shortcut forward to the hovered shortcut position", () => {
+    const profile = createDefaultProfile();
+    const updated = moveShortcut(profile, "shortcut:github", "group:media", "shortcut:cloudflare");
+    const orderedIds = updated.shortcuts
+      .filter((shortcut) => shortcut.groupId === "group:media" && !shortcut.deletedAt)
+      .sort((left, right) => left.sortIndex - right.sortIndex)
+      .map((shortcut) => shortcut.id);
+
+    expect(orderedIds).toEqual([
+      "shortcut:youtube",
+      "shortcut:cloudflare",
+      "shortcut:github",
+      "shortcut:google",
+      "shortcut:gmail"
+    ]);
+  });
+
+  it("appends a shortcut to the end of its current group when no target is supplied", () => {
+    const profile = createDefaultProfile();
+    const updated = moveShortcut(profile, "shortcut:youtube", "group:media");
+    const orderedIds = updated.shortcuts
+      .filter((shortcut) => shortcut.groupId === "group:media" && !shortcut.deletedAt)
+      .sort((left, right) => left.sortIndex - right.sortIndex)
+      .map((shortcut) => shortcut.id);
+
+    expect(orderedIds).toEqual([
+      "shortcut:github",
+      "shortcut:cloudflare",
+      "shortcut:google",
+      "shortcut:gmail",
+      "shortcut:youtube"
+    ]);
+  });
+
+  it("moves a shortcut into another group before the selected target", () => {
+    const withGroup = addShortcutGroup(createDefaultProfile(), "工具");
+    const tools = withGroup.groups.find((group) => group.title === "工具")!;
+    const withTarget = upsertShortcut(withGroup, {
+      id: "shortcut:tool",
+      groupId: tools.id,
+      title: "Tool",
+      url: "https://example.com",
+      icon: { kind: "text", text: "TO" }
+    });
+    const updated = moveShortcut(withTarget, "shortcut:github", tools.id, "shortcut:tool");
+    const toolOrder = updated.shortcuts
+      .filter((shortcut) => shortcut.groupId === tools.id && !shortcut.deletedAt)
+      .sort((left, right) => left.sortIndex - right.sortIndex)
+      .map((shortcut) => shortcut.id);
+
+    expect(toolOrder).toEqual(["shortcut:github", "shortcut:tool"]);
+    expect(
+      updated.shortcuts
+        .filter((shortcut) => shortcut.groupId === "group:media" && !shortcut.deletedAt)
+        .sort((left, right) => left.sortIndex - right.sortIndex)
+        .map((shortcut) => shortcut.sortIndex)
+    ).toEqual([0, 1, 2, 3]);
+  });
+
+  it("appends a shortcut when it is moved into an empty group", () => {
+    const withGroup = addShortcutGroup(createDefaultProfile(), "空分组");
+    const emptyGroup = withGroup.groups.find((group) => group.title === "空分组")!;
+    const updated = moveShortcut(withGroup, "shortcut:youtube", emptyGroup.id);
+    const moved = updated.shortcuts.find((shortcut) => shortcut.id === "shortcut:youtube");
+
+    expect(moved).toMatchObject({ groupId: emptyGroup.id, sortIndex: 0 });
+  });
+
+  it("appends an edited shortcut when its group changes in the form", () => {
+    const withGroup = addShortcutGroup(createDefaultProfile(), "工具");
+    const tools = withGroup.groups.find((group) => group.title === "工具")!;
+    const withExistingTarget = upsertShortcut(withGroup, {
+      id: "shortcut:tool",
+      groupId: tools.id,
+      title: "Tool",
+      url: "https://example.com",
+      icon: { kind: "text", text: "TO" }
+    });
+    const github = withExistingTarget.shortcuts.find((shortcut) => shortcut.id === "shortcut:github")!;
+    const updated = upsertShortcut(withExistingTarget, {
+      id: github.id,
+      groupId: tools.id,
+      title: github.title,
+      url: github.url,
+      icon: github.icon
+    });
+
+    expect(updated.shortcuts.find((shortcut) => shortcut.id === github.id)).toMatchObject({
+      groupId: tools.id,
+      sortIndex: 1
+    });
+    expect(
+      updated.shortcuts
+        .filter((shortcut) => shortcut.groupId === "group:media" && !shortcut.deletedAt)
+        .map((shortcut) => shortcut.sortIndex)
+        .sort((left, right) => left - right)
+    ).toEqual([0, 1, 2, 3]);
   });
 
   it("adds, renames, reorders, and deletes shortcut groups without losing shortcuts", () => {
