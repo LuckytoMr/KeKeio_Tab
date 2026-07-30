@@ -3,6 +3,7 @@ import { buildShortcutIcon, getKnownShortcutIconCandidates, getShortcutPrimaryIc
 import { fixedBackendUrl, isFixedBackendUrl } from "../sync/backendEndpoint";
 import { builtinWallpapers } from "../wallpaper/repository";
 import { createDefaultProfile } from "./defaults";
+import { normalizeShortcutIconSize } from "./theme";
 import type { Profile, Shortcut } from "./types";
 
 const legacyWashedOverlayOpacity = 0.58;
@@ -84,7 +85,8 @@ export function migrateProfile(input: Profile | undefined): Profile {
     : defaults.shortcuts;
   const theme = {
     ...defaults.theme,
-    ...input.theme
+    ...input.theme,
+    iconSize: normalizeShortcutIconSize(input.theme?.iconSize, defaults.theme.iconSize)
   };
   const usesPreviousVisualDefaults =
     input.theme?.styleId === "quark-flow" &&
@@ -95,8 +97,17 @@ export function migrateProfile(input: Profile | undefined): Profile {
     input.theme.rows === 2 &&
     input.theme.iconSize === "medium" &&
     (input.theme.iconShape === undefined || input.theme.iconShape === "squircle");
+  const usesCurrentVisualDefaults =
+    input.theme?.styleId === "quark-flow" &&
+    input.theme.density === "comfortable" &&
+    input.theme.sidebarSide === "left" &&
+    input.theme.showBrand === false &&
+    input.theme.columns === 8 &&
+    input.theme.rows === 2 &&
+    input.theme.iconSize === "tiny" &&
+    input.theme.iconShape === "circle";
 
-  if (usesPreviousVisualDefaults) {
+  if (usesPreviousVisualDefaults || usesCurrentVisualDefaults) {
     theme.columns = defaults.theme.columns;
     theme.iconSize = defaults.theme.iconSize;
     theme.iconShape = defaults.theme.iconShape;

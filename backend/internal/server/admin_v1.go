@@ -3154,34 +3154,10 @@ func adminV1FileSHA256(path string) (string, int64, error) {
 }
 
 func adminV1WriteFileAtomic(path string, data []byte, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	return writeFileAtomicDurable(path, ".admin-v1-write-*", mode, func(writer io.Writer) error {
+		_, err := writer.Write(data)
 		return err
-	}
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".admin-v1-write-*")
-	if err != nil {
-		return err
-	}
-	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
-	if err := temporary.Chmod(mode); err != nil {
-		temporary.Close()
-		return err
-	}
-	if _, err := temporary.Write(data); err != nil {
-		temporary.Close()
-		return err
-	}
-	if err := temporary.Sync(); err != nil {
-		temporary.Close()
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(temporaryPath, path); err != nil {
-		return err
-	}
-	return os.Chmod(path, mode)
+	})
 }
 
 func adminV1CopyFileAtomic(sourcePath, destinationPath string, mode os.FileMode) error {
@@ -3190,35 +3166,10 @@ func adminV1CopyFileAtomic(sourcePath, destinationPath string, mode os.FileMode)
 		return err
 	}
 	defer source.Close()
-	if err := os.MkdirAll(filepath.Dir(destinationPath), 0o700); err != nil {
+	return writeFileAtomicDurable(destinationPath, ".admin-v1-restore-*", mode, func(writer io.Writer) error {
+		_, err := io.Copy(writer, source)
 		return err
-	}
-	temporary, err := os.CreateTemp(filepath.Dir(destinationPath), ".admin-v1-restore-*")
-	if err != nil {
-		return err
-	}
-	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
-	if err := temporary.Chmod(mode); err != nil {
-		temporary.Close()
-		return err
-	}
-	if _, err := io.Copy(temporary, source); err != nil {
-		temporary.Close()
-		return err
-	}
-	if err := temporary.Sync(); err != nil {
-		temporary.Close()
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	_ = os.Remove(destinationPath)
-	if err := os.Rename(temporaryPath, destinationPath); err != nil {
-		return err
-	}
-	return os.Chmod(destinationPath, mode)
+	})
 }
 
 func adminV1PathWithin(basePath, candidatePath string) bool {

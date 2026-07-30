@@ -13,13 +13,21 @@
   --danger: #c63737;
   --shadow: 0 10px 28px rgba(42, 54, 71, 0.12);
   --radius: 8px;
-  --tile-size: 112px;
-  --tile-gap: 34px;
-  --shortcut-tile-min-height: 136px;
-  --shortcut-icon-size: 96px;
-  --shortcut-icon-image-size: 62px;
-  --shortcut-icon-font-size: 36px;
-  --shortcut-icon-radius: 29px;
+  --tile-size: 64px;
+  --shortcut-row-gap: 22px;
+  --shortcut-column-gap: 0px;
+  --shortcut-row-height: 117px;
+  --shortcut-tile-min-height: 108px;
+  --shortcut-icon-size: 64px;
+  --shortcut-icon-image-size: 40px;
+  --shortcut-icon-font-size: 24px;
+  --shortcut-icon-radius: 999px;
+}
+
+@property --search-flow-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
 }
 
 @supports (color: oklch(50% 0.1 20)) {
@@ -68,7 +76,9 @@ button {
 .app-shell {
   position: relative;
   width: 100%;
-  min-height: 100%;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
   isolation: isolate;
   overflow: hidden;
   background-position: center;
@@ -129,8 +139,10 @@ button {
 
 .home-stage {
   position: relative;
-  width: min(1060px, calc(100vw - 160px));
-  min-height: 100vh;
+  width: min(var(--shortcut-content-width, 820px), calc(100vw - 160px));
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
   margin: 0 auto;
   padding: 15vh 0 9vh;
   display: flex;
@@ -142,18 +154,79 @@ button {
   padding-top: max(96px, 15vh);
 }
 
+@keyframes search-border-flow {
+  to {
+    --search-flow-angle: 1turn;
+  }
+}
+
 .search-box {
+  --search-box-radius: 28px;
+
   position: relative;
   display: grid;
+  flex: 0 0 auto;
   grid-template-columns: 58px 1fr 58px;
   align-items: center;
-  width: min(820px, 100%);
+  width: 100%;
   min-height: 86px;
   padding: 13px;
-  border: 1px solid var(--line);
-  border-radius: 28px;
+  border: 1px solid transparent;
+  border-radius: var(--search-box-radius);
   background: rgba(255, 255, 255, 0.9);
   box-shadow: var(--shadow);
+  transition: box-shadow 180ms ease;
+}
+
+.search-box::before {
+  --search-flow-angle: 0deg;
+
+  position: absolute;
+  inset: -1px;
+  z-index: 0;
+  box-sizing: border-box;
+  padding: 2px;
+  border-radius: calc(var(--search-box-radius) + 1px);
+  background: conic-gradient(
+    from var(--search-flow-angle) at 50% 50%,
+    #ff4d4f 0deg,
+    #ff922b 51deg,
+    #f6d743 103deg,
+    #55d76a 154deg,
+    #32d5d2 206deg,
+    #4385f5 257deg,
+    #a855f7 309deg,
+    #ff4d4f 360deg
+  );
+  pointer-events: none;
+  content: "";
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  animation: search-border-flow 11.5s linear infinite;
+}
+
+.search-box > input,
+.search-box > .search-submit {
+  position: relative;
+  z-index: 1;
+}
+
+.search-box:hover::before {
+  animation-duration: 8s;
+}
+
+.search-box:focus-within {
+  box-shadow: var(--shadow), 0 0 0 3px rgba(50, 113, 230, 0.18);
+}
+
+.search-box:focus-within::before {
+  animation-duration: 6.5s;
 }
 
 .search-engine-picker {
@@ -193,10 +266,14 @@ button {
 }
 
 .search-engine-trigger:hover,
+.search-submit:hover {
+  background: #fff;
+}
+
 .search-engine-trigger:focus-visible,
-.search-submit:hover,
 .search-submit:focus-visible {
-  outline: none;
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
   background: #fff;
 }
 
@@ -291,11 +368,19 @@ button {
   width: 270px;
   max-height: 360px;
   padding: 8px;
+  overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
   border: 1px solid var(--line);
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.97);
   box-shadow: 0 14px 30px rgba(25, 35, 50, 0.15);
+}
+
+.search-engine-menu::-webkit-scrollbar {
+  display: none;
 }
 
 .search-engine-option {
@@ -463,30 +548,39 @@ button {
 }
 
 .shortcut-grid {
+  --shortcut-shadow-gutter: 18px;
   display: grid;
   grid-template-columns: repeat(var(--columns, 6), var(--tile-size));
-  justify-content: center;
-  gap: var(--tile-gap);
-  width: 100%;
+  grid-auto-rows: var(--shortcut-row-height);
+  justify-content: var(--shortcut-grid-justify, center);
+  align-content: start;
+  column-gap: var(--shortcut-column-gap, 22px);
+  row-gap: var(--shortcut-row-gap, 22px);
+  flex: 0 1 auto;
+  width: calc(100% + var(--shortcut-shadow-gutter) + var(--shortcut-shadow-gutter));
+  min-height: 0;
   margin-top: 14px;
+  margin-inline: calc(0px - var(--shortcut-shadow-gutter));
   max-height: var(--shortcut-grid-max-height, 42vh);
+  overflow-x: hidden;
   overflow-y: auto;
-  padding: 50px 4px 28px;
+  overscroll-behavior: contain;
+  padding:
+    var(--shortcut-grid-padding-top, 50px)
+    calc(var(--shortcut-grid-padding-inline, 0px) + var(--shortcut-shadow-gutter))
+    var(--shortcut-grid-padding-bottom, 28px);
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 
-.density-compact {
-  --tile-size: 96px;
-  --tile-gap: 22px;
-  --shortcut-tile-min-height: 116px;
-  --shortcut-icon-size: 82px;
-  --shortcut-icon-image-size: 52px;
-  --shortcut-icon-font-size: 30px;
-  --shortcut-icon-radius: 25px;
+.shortcut-grid::-webkit-scrollbar {
+  display: none;
 }
 
 .shortcut-tile {
   position: relative;
   width: var(--tile-size);
+  height: var(--shortcut-row-height);
   min-height: var(--shortcut-tile-min-height);
   text-align: center;
   user-select: none;
@@ -534,7 +628,7 @@ button {
   position: relative;
   display: grid;
   justify-items: center;
-  gap: 13px;
+  gap: var(--shortcut-content-gap, 13px);
   width: 100%;
   border: 0;
   background: transparent;
@@ -675,17 +769,22 @@ button {
 }
 
 .shortcut-title {
-  display: block;
+  display: -webkit-box;
   width: 100%;
-  min-height: 40px;
+  height: var(--shortcut-title-height, 40px);
   color: #fff;
-  font-size: 16px;
-  font-weight: 620;
-  line-height: 1.25;
+  font-size: var(--shortcut-title-font-size, 14px);
+  font-weight: 600;
+  line-height: 1.2;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  word-break: normal;
   overflow-wrap: anywhere;
+  text-wrap: balance;
   text-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.55),
-    0 5px 14px rgba(0, 0, 0, 0.3);
+    0 0 1px rgba(15, 23, 42, 0.58),
+    0 1px 2px rgba(15, 23, 42, 0.52);
 }
 
 .shortcut-context-menu,
@@ -1267,39 +1366,6 @@ button {
   background: #fff;
 }
 
-.sync-endpoint {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px 20px;
-  padding: 14px 16px;
-  border: 1px solid color-mix(in srgb, var(--accent), var(--line) 68%);
-  border-radius: var(--radius);
-  background: color-mix(in srgb, var(--accent), #fff 95%);
-}
-
-.sync-endpoint > div {
-  display: grid;
-  gap: 4px;
-}
-
-.sync-endpoint span {
-  color: var(--muted);
-  font-size: 0.875rem;
-}
-
-.sync-endpoint strong {
-  color: var(--ink);
-  font-size: 1rem;
-  overflow-wrap: anywhere;
-}
-
-.sync-endpoint p {
-  max-width: 20rem;
-  font-size: 0.875rem;
-  text-align: right;
-}
-
 .sync-field {
   display: grid;
   grid-template-columns: 120px minmax(0, 1fr);
@@ -1636,7 +1702,7 @@ button {
   line-height: 1.7;
 }
 
-@media (max-width: 920px) {
+@media (max-width: 980px) {
   .home-stage {
     width: min(640px, calc(100vw - 34px));
     padding-top: 11vh;
@@ -1647,7 +1713,8 @@ button {
   }
 
   .shortcut-grid {
-    --columns: 4;
+    --columns: var(--tablet-columns);
+    --shortcut-column-gap: var(--tablet-shortcut-column-gap);
   }
 
   .side-rail {
@@ -1682,15 +1749,12 @@ button {
 }
 
 @media (max-width: 560px) {
-  body {
-    overflow: auto;
-  }
-
   .search-box {
+    --search-box-radius: 22px;
+
     grid-template-columns: 48px 1fr 50px;
     min-height: 70px;
     padding: 10px;
-    border-radius: 22px;
   }
 
   .shortcut-edit-mode .home-stage {
@@ -1733,13 +1797,8 @@ button {
 
   .shortcut-grid {
     --columns: var(--mobile-columns);
-    --tile-size: 74px;
-    --tile-gap: 18px;
+    --shortcut-column-gap: var(--mobile-shortcut-column-gap);
     max-height: var(--shortcut-grid-max-height, none);
-  }
-
-  .shortcut-title {
-    font-size: 13px;
   }
 
   .settings-panel {
@@ -1789,15 +1848,6 @@ button {
     gap: 7px;
   }
 
-  .sync-endpoint {
-    grid-template-columns: 1fr;
-  }
-
-  .sync-endpoint p {
-    max-width: none;
-    text-align: left;
-  }
-
   .sync-field-error {
     grid-column: 1;
     margin-top: 0;
@@ -1820,7 +1870,19 @@ button {
   }
 }
 
+@media (max-width: 380px) {
+  .shortcut-grid {
+    --columns: var(--narrow-columns);
+    --shortcut-column-gap: var(--narrow-shortcut-column-gap);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .search-box::before {
+    --search-flow-angle: 0deg;
+    animation: none !important;
+  }
+
   *,
   *::before,
   *::after {

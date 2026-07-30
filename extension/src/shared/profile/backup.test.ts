@@ -71,6 +71,15 @@ describe("profile backup", () => {
     expect(imported.shortcuts.length).toBeGreaterThan(0);
   });
 
+  it("imports legacy V2 backups with removed icon sizes as the supported large size", () => {
+    const backup = JSON.parse(exportProfileBackup(createDefaultProfile()));
+    backup.profile.theme.iconSize = "xlarge";
+
+    const imported = parseProfileBackup(JSON.stringify(backup), createDefaultProfile());
+
+    expect(imported.theme.iconSize).toBe("medium");
+  });
+
   it("rejects files that are not KeKeIO Tab profile backups", () => {
     const local = createDefaultProfile();
     expect(() => parseProfileBackup("{}", local)).toThrow("不是有效的 KeKeIO Tab 配置文件");

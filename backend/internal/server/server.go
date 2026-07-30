@@ -356,13 +356,13 @@ func (a *App) withAPILogging(next http.Handler) http.Handler {
 		}
 
 		started := time.Now()
+		user, _ := a.userForAPILog(r)
 		recorder := &loggedResponseWriter{ResponseWriter: w}
 		next.ServeHTTP(recorder, r)
 		if recorder.status == 0 {
 			recorder.status = http.StatusOK
 		}
 
-		user, _ := a.currentUser(r)
 		if recorder.status == http.StatusNotFound && user.ID == "" {
 			return
 		}
@@ -1064,6 +1064,16 @@ func (a *App) currentUser(r *http.Request) (User, error) {
 	return a.store.UserBySession(r.Context(), cookie.Value)
 }
 
+func (a *App) userForAPILog(r *http.Request) (User, error) {
+	if token := bearerToken(r); token != "" {
+		if r.URL.Path == "/api/v1" || strings.HasPrefix(r.URL.Path, "/api/v1/") {
+			return a.store.UserByAccessToken(r.Context(), token)
+		}
+		return a.store.UserBySession(r.Context(), token)
+	}
+	return a.currentUser(r)
+}
+
 func bearerToken(r *http.Request) string {
 	header := r.Header.Get("Authorization")
 	if len(header) < len("Bearer ")+1 {
@@ -1281,19 +1291,11 @@ func (a *App) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (a *App) decodeJSON(w http.ResponseWriter, r *http.Request, dest any) bool {
-	defer r.Body.Close()
-	limited := io.LimitReader(r.Body, a.config.MaxBodyBytes)
-	decoder := json.NewDecoder(limited)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(dest); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
+	raw, ok := a.readRequestBody(w, r)
+	if !ok {
 		return false
 	}
-	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		writeError(w, http.StatusBadRequest, "invalid json: multiple values")
-		return false
-	}
-	return true
+	return decodeJSONBytes(w, raw, dest)
 }
 
 func (a *App) readRequestBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {

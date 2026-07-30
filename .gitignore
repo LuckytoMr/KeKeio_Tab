@@ -15,6 +15,9 @@ backups/
 *.restore-intent.json*
 secrets.json
 install-code
+cloudflare-tunnel-token
+cloudflared-token
+backend/deploy/router/secrets/
 
 # Local environment files and private key material
 .env

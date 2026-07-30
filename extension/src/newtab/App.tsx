@@ -15,9 +15,15 @@ import { buildProfileBackupFilename, exportProfileBackup, parseProfileBackup } f
 import { createDefaultProfile } from "../shared/profile/defaults";
 import { sharedProfileToLocalProfile, type SharedProfileV2 } from "../shared/profile/sharedProfile";
 import {
+  getShortcutDensityMetrics,
+  getShortcutGridColumnGap,
+  getShortcutGridMaxHeight,
   getShortcutGridColumnCount,
+  getShortcutGridJustification,
   getShortcutIconShapeRadius,
   getShortcutIconSizeMetrics,
+  getShortcutRowHeight,
+  shortcutGridLayout,
   shortcutIconShapeOptions,
   shortcutIconSizeOptions
 } from "../shared/profile/theme";
@@ -1542,24 +1548,47 @@ export function App() {
 
   const appStyle = useMemo(
     () => {
-      const iconMetrics = getShortcutIconSizeMetrics(profile.theme.iconSize, profile.theme.density);
+      const iconMetrics = getShortcutIconSizeMetrics(profile.theme.iconSize);
+      const densityMetrics = getShortcutDensityMetrics(profile.theme.density, profile.theme.iconSize);
       const visibleItemCount = visibleShortcuts.length + 1;
       const gridColumnCount = getShortcutGridColumnCount(profile.theme.columns, visibleItemCount);
+      const tabletGridColumnCount = Math.min(4, gridColumnCount);
       const mobileGridColumnCount = Math.min(3, gridColumnCount);
+      const narrowGridColumnCount = Math.min(2, gridColumnCount);
+      const gridJustification = getShortcutGridJustification(profile.theme.density, gridColumnCount);
+      const spreadsFullRow = gridJustification === "space-between";
+      const getColumnGap = (columnCount: number) =>
+        spreadsFullRow
+          ? 0
+          : getShortcutGridColumnGap(columnCount, iconMetrics, densityMetrics.preferredColumnGap);
 
       return {
         ...wallpaperStyle,
         "--columns": String(gridColumnCount),
+        "--tablet-columns": String(tabletGridColumnCount),
         "--mobile-columns": String(mobileGridColumnCount),
-        "--rows": String(profile.theme.rows),
+        "--narrow-columns": String(narrowGridColumnCount),
         "--tile-size": `${iconMetrics.tileSize}px`,
-        "--tile-gap": `${iconMetrics.tileGap}px`,
+        "--shortcut-row-gap": `${densityMetrics.rowGap}px`,
+        "--shortcut-column-gap": `${getColumnGap(gridColumnCount)}px`,
+        "--tablet-shortcut-column-gap": `${getColumnGap(tabletGridColumnCount)}px`,
+        "--mobile-shortcut-column-gap": `${getColumnGap(mobileGridColumnCount)}px`,
+        "--narrow-shortcut-column-gap": `${getColumnGap(narrowGridColumnCount)}px`,
+        "--shortcut-grid-justify": gridJustification,
+        "--shortcut-content-width": `${shortcutGridLayout.contentWidth}px`,
+        "--shortcut-grid-padding-top": `${densityMetrics.paddingTop}px`,
+        "--shortcut-grid-padding-bottom": `${densityMetrics.paddingBottom}px`,
+        "--shortcut-grid-padding-inline": `${shortcutGridLayout.paddingInline}px`,
+        "--shortcut-content-gap": `${densityMetrics.contentGap}px`,
+        "--shortcut-title-height": `${shortcutGridLayout.titleHeight}px`,
         "--shortcut-tile-min-height": `${iconMetrics.tileMinHeight}px`,
+        "--shortcut-row-height": `${getShortcutRowHeight(iconMetrics, densityMetrics)}px`,
         "--shortcut-icon-size": `${iconMetrics.iconSize}px`,
         "--shortcut-icon-image-size": `${iconMetrics.imageSize}px`,
         "--shortcut-icon-font-size": `${iconMetrics.fallbackFontSize}px`,
+        "--shortcut-title-font-size": `${iconMetrics.titleFontSize}px`,
         "--shortcut-icon-radius": getShortcutIconShapeRadius(profile.theme.iconShape, iconMetrics.iconSize),
-        "--shortcut-grid-max-height": `${profile.theme.rows * iconMetrics.tileMinHeight + (profile.theme.rows - 1) * iconMetrics.tileGap + 16}px`,
+        "--shortcut-grid-max-height": `${getShortcutGridMaxHeight(profile.theme.rows, iconMetrics, densityMetrics)}px`,
         "--wallpaper-overlay-opacity": String(profile.wallpaper.overlayOpacity),
         "--wallpaper-blur": `${profile.wallpaper.blur}px`
       } as JSX.CSSProperties;
@@ -2038,6 +2067,17 @@ export function App() {
     if (target.closest("input, textarea, select, .settings-panel, .modal-backdrop, .shortcut-context-menu, .wallpaper-context-menu, .shortcut-edit-toolbar")) return;
     if (shortcutDragRef.current && !shortcutEditMode) return;
     if (Math.abs(event.deltaY) < 10 || groupWheelLockedRef.current) return;
+
+    const shortcutGrid = target.closest<HTMLElement>(".shortcut-grid");
+    if (shortcutGrid) {
+      const scrollBoundaryEpsilon = 1;
+      const maxScrollTop = shortcutGrid.scrollHeight - shortcutGrid.clientHeight;
+      const canScrollDown =
+        event.deltaY > 0 && shortcutGrid.scrollTop < maxScrollTop - scrollBoundaryEpsilon;
+      const canScrollUp = event.deltaY < 0 && shortcutGrid.scrollTop > scrollBoundaryEpsilon;
+
+      if (canScrollDown || canScrollUp) return;
+    }
 
     event.preventDefault();
     event.stopPropagation();
@@ -3156,13 +3196,6 @@ export function App() {
                   </div>
 
                   <div className="sync-card">
-                    <div className="sync-endpoint" aria-label="固定云端服务地址">
-                      <div>
-                        <span>KeKeIO Tab 云端</span>
-                        <strong>{fixedBackendUrl}</strong>
-                      </div>
-                      <p>扩展固定使用此服务地址，无需配置。</p>
-                    </div>
                     <label className="sync-field">
                       <span>邮箱</span>
                       <input

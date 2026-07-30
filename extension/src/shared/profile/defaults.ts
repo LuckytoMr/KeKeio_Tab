@@ -72,7 +72,7 @@ export function createDefaultProfile(): Profile {
       showBrand: false,
       columns: 8,
       rows: 2,
-      iconSize: "tiny",
+      iconSize: "mini",
       iconShape: "circle"
     },
     sync: {

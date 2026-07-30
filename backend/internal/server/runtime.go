@@ -60,6 +60,9 @@ func ValidateConfig(config Config) error {
 	if config.PasswordHashConcurrency < 0 || config.PasswordHashConcurrency > maxPasswordHashConcurrency {
 		return fmt.Errorf("password hash concurrency must be between 1 and %d", maxPasswordHashConcurrency)
 	}
+	if !config.DevelopmentMode && len(config.AdminAllowedCIDRs) == 0 {
+		return fmt.Errorf("admin allowed CIDR is required outside development mode")
+	}
 	for label, values := range map[string][]string{
 		"admin allowed CIDR": config.AdminAllowedCIDRs,
 		"trusted proxy CIDR": config.TrustedProxyCIDRs,

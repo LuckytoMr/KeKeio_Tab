@@ -7,7 +7,7 @@ COPY admin-ui/index.html admin-ui/tsconfig.json admin-ui/vite.config.ts ./
 COPY admin-ui/src ./src
 RUN pnpm build
 
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.26.5-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum* ./
 RUN go mod download

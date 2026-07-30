@@ -34,14 +34,23 @@ func TestValidateConfigRejectsInvalidStartupCIDRs(t *testing.T) {
 	}
 }
 
+func TestValidateConfigRequiresExplicitProductionAdminCIDR(t *testing.T) {
+	if err := ValidateConfig(Config{}); err == nil {
+		t.Fatal("production configuration without an administrator CIDR was accepted")
+	}
+	if err := ValidateConfig(Config{DevelopmentMode: true}); err != nil {
+		t.Fatalf("development configuration without an administrator CIDR was rejected: %v", err)
+	}
+}
+
 func TestValidateConfigRejectsUnsafePasswordHashConcurrency(t *testing.T) {
 	for _, value := range []int{-1, maxPasswordHashConcurrency + 1} {
-		if err := ValidateConfig(Config{PasswordHashConcurrency: value}); err == nil {
+		if err := ValidateConfig(Config{PasswordHashConcurrency: value, DevelopmentMode: true}); err == nil {
 			t.Fatalf("password hash concurrency %d was accepted", value)
 		}
 	}
 	for _, value := range []int{0, 1, defaultPasswordHashConcurrency, maxPasswordHashConcurrency} {
-		if err := ValidateConfig(Config{PasswordHashConcurrency: value}); err != nil {
+		if err := ValidateConfig(Config{PasswordHashConcurrency: value, DevelopmentMode: true}); err != nil {
 			t.Fatalf("password hash concurrency %d rejected: %v", value, err)
 		}
 	}

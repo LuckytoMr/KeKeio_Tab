@@ -4,45 +4,52 @@ KeKeIO Tab 的单机自托管后端，提供邮箱验证账号、`SharedProfile 
 
 ## Docker 正式部署
 
-正式后端统一监听容器端口 `9009`，并由 HTTPS 反向代理提供 `https://tab.kekeio.com`。仓库提供可直接运行的路由器部署包：
+正式后端统一监听容器端口 `9009`，并由 Caddy 提供严格路径白名单。小米路由器推荐使用 Cloudflare Tunnel：公网只进入 Caddy 的公网专用监听器，安装与后台使用独立的 LAN HTTPS 入口，后端端口不发布。
 
 - [完整路由器部署指南](deploy/router/README.md)
 - [Docker Compose](deploy/router/compose.yaml)
-- [Caddyfile](deploy/router/Caddyfile)
+- [标准 Tunnel 覆盖](deploy/router/compose.tunnel.yaml)
+- [SimpleDocker Tunnel 覆盖](deploy/router/compose.tunnel-simpledocker.yaml)
+- [Tunnel 专用 Caddyfile](deploy/router/Caddyfile.tunnel)
 - [环境变量样例](deploy/router/router.env.example)
 
 ```sh
 # Git 仓库中：cd backend/deploy/router
 # 后端 Release ZIP 解压后：cd deploy/router
 cp router.env.example .env
-# 私有 GHCR 路径：先填写发布的 KEKEIO_IMAGE，再编辑持久目录、LAN CIDR 和 Docker 网段
-docker compose --env-file .env -f compose.yaml pull
-docker compose --env-file .env -f compose.yaml up -d
+# 填写固定镜像、持久目录、路由器 LAN 地址、精确管理 CIDR 与 Tunnel 文件路径
+docker compose -p kekeio-tab --env-file .env \
+  -f compose.yaml -f compose.tunnel-simpledocker.yaml config
 ```
 
 ### 离线 ARM64 Docker 镜像
 
-从 Actions 的保留 14 天 artifact 或 `v*` GitHub Release 下载并解压后，`kekeio-tab-docker-arm64.tar` 已包含完整运行时和后端程序：
+从 Actions artifact 或 `v*` GitHub Release 下载完整的路由器包并先校验：
 
 ```sh
-docker load -i kekeio-tab-docker-arm64.tar
+sha256sum -c kekeio-tab-router-arm64.tar.sha256
+docker load -i kekeio-tab-router-arm64.tar
 ```
 
-导入后的镜像名为 `kekeio-tab:arm64`。在 `deploy/router/.env` 中设置 `KEKEIO_IMAGE=kekeio-tab:arm64`，保留 `KEKEIO_TRUSTED_PROXIES=172.30.88.2/32` 与真实 LAN CIDR，然后使用完整的 Compose+Caddy 拓扑启动：
+完整 tar 包含 `kekeio-tab:arm64`、`caddy:2.11.4-alpine` 和 `cloudflare/cloudflared:2026.7.3`。仅含应用的兼容包 `kekeio-tab-docker-arm64.tar` 仍可用 `docker load` 导入，但完全离线时必须另外准备 Caddy 与 cloudflared。
+
+在 `deploy/router/.env` 中设置 `KEKEIO_IMAGE=kekeio-tab:arm64`，保持 `KEKEIO_TRUSTED_PROXIES=172.30.88.2/32`，并填写真实 LAN 地址、最小管理 CIDR、Docker bridge gateway 和受保护的 Token 文件路径。小米/SimpleDocker 启动命令为：
 
 ```sh
-docker compose --env-file .env -f compose.yaml up -d --pull never
+docker compose -p kekeio-tab --env-file .env \
+  -f compose.yaml -f compose.tunnel-simpledocker.yaml \
+  up -d --pull never
 ```
 
-离线路径不需要登录私有 GHCR，也不执行 `docker compose pull`；Compose 会创建 `kekeio-tab-edge` bridge 网络并让 Caddy 使用该精确可信代理地址。完全离线时，`caddy:2.11.4-alpine` 也必须已经在本地镜像缓存中。`bin/fullpro-server-linux-arm64` 是供非 Docker 场景使用的裸二进制，不能执行 `docker load -i bin/fullpro-server-linux-arm64`。不要用裸 `docker run` 提供安装或后台入口。
+离线路径不登录 GHCR，也不执行 pull。新 Tunnel Token 只能通过本地只读文件挂载；不要放入命令、环境变量或 Git。`bin/fullpro-server-linux-arm64` 是非 Docker 场景的裸二进制，不能执行 `docker load -i bin/fullpro-server-linux-arm64`。
 
-默认链路为：
+Tunnel 链路为：
 
 ```text
-https://tab.kekeio.com:443 -> WAN 443 -> host 8443 -> Caddy 443 -> backend:9009
+https://tab.kekeio.com -> Cloudflare Edge -> cloudflared -> Caddy :8081 -> backend:9009
 ```
 
-公网域名没有端口后缀。DNS 只解析 IP；外部 `80/443` 到内部 `8080/8443` 的转换由路由器 NAT 完成，Caddy 再把 HTTP 请求转到 `backend:9009`。不要把 WAN `9009` 直接映射给 Go 后端。
+Tunnel 只需出站连接，不做 WAN 端口转发。严禁使用 `--network container:...`，也不要把 Tunnel origin 设置为 backend 或 `localhost:9009`；这会绕过 Caddy 公网白名单和后端代理信任边界。
 
 镜像以 UID/GID `10001` 非 root 用户运行。使用宿主机目录前必须预创建 `/data` 与 `/backups` 对应路径并 `chown 10001:10001`；优先使用 ext4 等支持 SQLite 锁、WAL、原子 rename 和 Unix 权限的本地文件系统。Docker 启动时会验证 `/backups` 可写并执行 `fsync`，失败直接退出。同一磁盘上的两个目录只提供逻辑隔离；灾备仍需第二介质或离机复制。
 
@@ -54,24 +61,23 @@ https://tab.kekeio.com:443 -> WAN 443 -> host 8443 -> Caddy 443 -> backend:9009
 docker compose --env-file .env -f compose.yaml logs backend
 ```
 
-在允许的局域网中打开：
+Tunnel 模式先按完整指南导出并信任 Caddy 本地 CA，然后在允许的局域网中打开：
 
 ```text
-https://tab.kekeio.com/install
+https://<路由器LAN地址>:8443/install
 ```
 
 安装向导会完成环境检查、独立管理员创建、公网 API、精确扩展来源、SMTP、配额及保留策略配置。公网 URL 填 `https://tab.kekeio.com`，不要追加 `:9009` 或 `:8443`；备份目录填 `/backups`。系统没有默认管理员账号或固定生产密码，安装完成后一次性安装码会失效并删除。
 
-后台入口是 `https://tab.kekeio.com/admin`。Caddy 只允许 `.env` 中配置的精确 LAN/VLAN 来源访问 `/admin*`、`/install*` 和 `/api/admin/*`；后端还会再次执行管理员 CIDR 与 HTTPS 校验。部署后必须从真正的外网确认这些路径返回 404，任一验证失败都必须停止上线。若路由器把 WAN 来源 SNAT 成允许的 LAN 地址，应改用路由器防火墙、仅 LAN/VPN 管理入口，不能只依赖 Caddy matcher。
+Tunnel 模式的后台入口是 `https://<路由器LAN地址>:8443/admin`；公网 `https://tab.kekeio.com/admin` 必须返回 404。Caddy 只允许 `.env` 中配置的精确 LAN/VLAN 来源访问 `/admin*`、`/install*` 和 `/api/admin/*`，后端还会再次执行管理员 CIDR 与 HTTPS 校验。任一公网管理路径不是 404 都必须停止上线。
 
 ### 路由器端口与 IPv4/IPv6
 
-- Docker 主机 `80/443` 未占用时，Caddy 可直接发布标准端口。
-- 路由器管理页面占用 `80/443` 时，默认让 Caddy 发布 `8080/8443`，再配置外部 TCP `80→8080`、TCP `443→8443`；UDP `443→8443` 仅用于可选 HTTP/3。
-- Docker 位于独立 LAN 主机时，普通端口转发的内部 IP 填该主机地址。Docker 就在路由器本机时，可能需要本机 DNAT/redirect；部分家用路由器的“转发到内网设备”页面不能选择路由器自身。
-- LAN 访问公网域名需要 NAT loopback。使用 split DNS 时，若域名指向独立 Docker 主机，该主机必须直接监听 `80/443`；若保留 `8080/8443`，域名应指向能在 LAN 侧继续执行 `80/443→8080/8443` 重定向的路由器地址。
-- IPv6 通常不做 NAT。只有外部标准 TCP `443` 确实能到达 Caddy 时才发布 AAAA；否则部分客户端会优先 IPv6 后失败。
-- A 与 AAAA 必须到达同一套反向代理规则。任意一条链路未完成时不要发布对应记录。
+- Tunnel 只建立出站连接，不开放或转发任何 WAN 端口。
+- `8080/8443` 只绑定路由器真实 LAN 地址；管理电脑通过 `8443` 和受信任的 Caddy 本地 CA 访问。
+- SimpleDocker 兼容方案把 `18081` 只绑定到 Docker 默认 bridge gateway，并且该 Caddy 监听器只包含公网白名单。
+- Tunnel DNS 记录由 Cloudflare 管理；删除绕过 Tunnel、直接指向家庭公网地址的旧 A/AAAA。
+- 只有明确停用 Tunnel、改回直连模式时，才按完整指南配置标准 WAN `80/443`、证书与防火墙。
 
 ### 反向代理路径与可信代理
 

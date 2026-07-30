@@ -340,6 +340,155 @@ func TestAccessLogDropsQueryBeforePersistence(t *testing.T) {
 	}
 }
 
+func TestAccessLogAttributesV1BearerAccessToken(t *testing.T) {
+	app, store := newTestApp(t)
+	handler := app.Routes()
+
+	user, err := store.CreateUser(t.Context(), "access-log-v1@example.com", "safe-password-123")
+	if err != nil {
+		t.Fatalf("create plugin user: %v", err)
+	}
+	tokens, err := store.CreateTokenFamily(t.Context(), user.ID, "access-log-device")
+	if err != nil {
+		t.Fatalf("create access token: %v", err)
+	}
+
+	response := getBearer(t, handler, "/api/v1/me", tokens.AccessToken)
+	if response.Code != http.StatusOK {
+		t.Fatalf("v1 me = %d %s", response.Code, response.Body.String())
+	}
+
+	var loggedUserID, loggedEmail, loggedRole string
+	if err := store.db.QueryRowContext(
+		t.Context(),
+		`SELECT user_id,user_email,role FROM api_logs WHERE path='/api/v1/me' ORDER BY created_at DESC LIMIT 1`,
+	).Scan(&loggedUserID, &loggedEmail, &loggedRole); err != nil {
+		t.Fatalf("read v1 access log identity: %v", err)
+	}
+	if loggedUserID != user.ID || loggedEmail != user.Email || loggedRole != string(user.Role) {
+		t.Fatalf(
+			"v1 access log identity = (%q, %q, %q), want (%q, %q, %q)",
+			loggedUserID,
+			loggedEmail,
+			loggedRole,
+			user.ID,
+			user.Email,
+			user.Role,
+		)
+	}
+
+	logoutRequest := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", strings.NewReader(`{}`))
+	logoutRequest.RemoteAddr = "127.0.0.1:1234"
+	logoutRequest.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
+	logoutRequest.Header.Set("Content-Type", "application/json")
+	logoutResponse := httptest.NewRecorder()
+	handler.ServeHTTP(logoutResponse, logoutRequest)
+	if logoutResponse.Code != http.StatusNoContent {
+		t.Fatalf("v1 logout = %d %s", logoutResponse.Code, logoutResponse.Body.String())
+	}
+
+	if err := store.db.QueryRowContext(
+		t.Context(),
+		`SELECT user_id FROM api_logs WHERE path='/api/v1/auth/logout' ORDER BY created_at DESC LIMIT 1`,
+	).Scan(&loggedUserID); err != nil {
+		t.Fatalf("read v1 logout access log identity: %v", err)
+	}
+	if loggedUserID != user.ID {
+		t.Fatalf("v1 logout access log user = %q, want %q", loggedUserID, user.ID)
+	}
+}
+
+func TestAccessLogKeepsLegacyBearerSessionAttribution(t *testing.T) {
+	app, store := newTestApp(t)
+	handler := app.Routes()
+
+	user, err := store.CreateUser(t.Context(), "access-log-legacy@example.com", "safe-password-123")
+	if err != nil {
+		t.Fatalf("create legacy plugin user: %v", err)
+	}
+	sessionToken, err := store.CreateSession(t.Context(), user.ID, time.Hour)
+	if err != nil {
+		t.Fatalf("create legacy session: %v", err)
+	}
+
+	response := getBearer(t, handler, "/api/me", sessionToken)
+	if response.Code != http.StatusOK {
+		t.Fatalf("legacy me = %d %s", response.Code, response.Body.String())
+	}
+
+	var loggedUserID string
+	if err := store.db.QueryRowContext(
+		t.Context(),
+		`SELECT user_id FROM api_logs WHERE path='/api/me' ORDER BY created_at DESC LIMIT 1`,
+	).Scan(&loggedUserID); err != nil {
+		t.Fatalf("read legacy access log identity: %v", err)
+	}
+	if loggedUserID != user.ID {
+		t.Fatalf("legacy access log user = %q, want %q", loggedUserID, user.ID)
+	}
+}
+
+func TestDecodeJSONEnforcesWholeBodyLimitAndSingleValue(t *testing.T) {
+	valid := `{"value":1}`
+	tests := []struct {
+		name       string
+		body       string
+		maxBytes   int64
+		wantOK     bool
+		wantStatus int
+	}{
+		{
+			name:     "accepts body exactly at limit",
+			body:     valid,
+			maxBytes: int64(len(valid)),
+			wantOK:   true,
+		},
+		{
+			name:       "rejects bytes after valid prefix beyond limit",
+			body:       valid + "x",
+			maxBytes:   int64(len(valid)),
+			wantStatus: http.StatusRequestEntityTooLarge,
+		},
+		{
+			name:       "rejects trailing data within limit",
+			body:       valid + "x",
+			maxBytes:   int64(len(valid) + 1),
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "rejects second JSON value within limit",
+			body:       valid + `{}`,
+			maxBytes:   int64(len(valid) + 2),
+			wantStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			app := &App{config: Config{MaxBodyBytes: test.maxBytes}}
+			request := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(test.body))
+			response := httptest.NewRecorder()
+			var payload struct {
+				Value int `json:"value"`
+			}
+
+			gotOK := app.decodeJSON(response, request, &payload)
+			if gotOK != test.wantOK {
+				t.Fatalf("decodeJSON() = %v, want %v; status=%d body=%s", gotOK, test.wantOK, response.Code, response.Body.String())
+			}
+			if test.wantOK {
+				if payload.Value != 1 {
+					t.Fatalf("decoded value = %d, want 1", payload.Value)
+				}
+				return
+			}
+			if response.Code != test.wantStatus {
+				t.Fatalf("status = %d, want %d; body=%s", response.Code, test.wantStatus, response.Body.String())
+			}
+		})
+	}
+}
+
 func TestAdminUsersEndpointListsPluginUsersOnly(t *testing.T) {
 	app, store := newTestApp(t)
 	handler := app.Routes()

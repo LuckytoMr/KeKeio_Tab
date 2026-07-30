@@ -1,0 +1,10 @@
+安全说明：
+1. 旧 Cloudflare Tunnel Token 已暴露，必须先在 Cloudflare 控制台轮换并强制断开旧连接。
+2. 不要把新 Token 写进本文件、.env、docker run 参数或聊天记录。
+3. 不要使用 --network container:kekeio-tab；它会绕过部署中的公网路径白名单，并可能把管理入口暴露给 Tunnel。
+
+ARM64 应用镜像导入：
+docker load -i kekeio-tab-docker-arm64.tar
+
+正式启动、Tunnel Token 文件创建、Cloudflare 控制台配置和验收命令：
+请按 backend/deploy/router/README.md 的“Cloudflare Tunnel”章节执行。
