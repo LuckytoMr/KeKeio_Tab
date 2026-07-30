@@ -24,7 +24,7 @@ docker compose -p kekeio-tab --env-file .env \
 
 ### 离线 ARM64 Docker 镜像
 
-从 Actions artifact 或 `v*` GitHub Release 下载完整的路由器包并先校验：
+从 `v*` GitHub Release 下载完整的路由器包并先校验：
 
 ```sh
 sha256sum -c kekeio-tab-router-arm64.tar.sha256

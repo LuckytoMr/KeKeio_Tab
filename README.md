@@ -51,14 +51,19 @@ docker compose --env-file .env -f compose.yaml up -d
 ghcr.io/<GitHub用户名>/kekeio-tab:sha-<完整提交SHA>
 ```
 
-普通 `main` 推送或未选择 `v*` 标签的 `workflow_dispatch` 会生成保留 14 天的 `kekeio-tab-release` Actions artifact，其中包含三个文件：`kekeio-tab-backend.zip`、`kekeio-tab-extension.zip` 和 `kekeio-tab-docker-arm64.tar`。推送 `v*` 标签还会创建私有 GitHub Release，并持久附带同样的两个 ZIP 和 ARM64 tar；后端 ZIP 包含上述路由器部署文件。普通运行中 `Create GitHub Release` 显示 skipped 是预期行为。
+普通 `main` 推送或未选择 `v*` 标签的 `workflow_dispatch` 只做验证和镜像发布，不创建 Actions Artifact。推送 `v*` 标签时，GitHub Actions 会在云端构建发布包，并在同一个 Job 中直接上传到 GitHub Release：`kekeio-tab-backend.zip`、`kekeio-tab-extension.zip`、`kekeio-tab-docker-arm64.tar`、`kekeio-tab-router-arm64.tar` 及各自的 `.sha256` 校验文件。后端 ZIP 包含路由器部署文件；重跑同一个标签会安全覆盖同名 Release 资源。
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
 
 ### 路由器 ARM64 离线镜像
 
-Actions artifact 或 `v*` GitHub Release 中的 `kekeio-tab-docker-arm64.tar` 可直接导入 Docker。它与 `bin/fullpro-server-linux-arm64` 不同：前者是完整 Docker image archive，后者只是裸可执行文件，不能用于 `docker load`。
+从 `v*` GitHub Release 下载 `kekeio-tab-router-arm64.tar` 后，可直接导入完整的路由器离线镜像包。`kekeio-tab-docker-arm64.tar` 是仅含应用镜像的兼容包。两者都与 `bin/fullpro-server-linux-arm64` 不同：tar 是 Docker image archive，裸二进制不能用于 `docker load`。
 
 ```sh
-docker load -i kekeio-tab-docker-arm64.tar
+docker load -i kekeio-tab-router-arm64.tar
 docker image inspect kekeio-tab:arm64
 ```
 
