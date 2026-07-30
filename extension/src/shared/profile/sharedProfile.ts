@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { migrateProfile } from "./migrate";
+import { normalizeShortcutIconSize } from "./theme";
 import type { Profile, ShortcutIcon } from "./types";
 
 const shortText = z.string().min(1).max(32);
@@ -52,6 +53,9 @@ const portableWallpaperSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("builtin"), id: identifier }).strict(),
   z.object({ kind: z.literal("remote"), id: identifier, variantId: identifier }).strict()
 ]);
+const shortcutIconSizeSchema = z
+  .enum(["tiny", "mini", "small", "medium", "large", "xlarge"])
+  .transform((value) => normalizeShortcutIconSize(value));
 
 const sharedProfileV2BaseSchema = z.object({
   schemaVersion: z.literal(2),
@@ -81,7 +85,7 @@ const sharedProfileV2BaseSchema = z.object({
     showBrand: z.boolean(),
     columns: z.union([z.literal(4), z.literal(5), z.literal(6), z.literal(7), z.literal(8)]),
     rows: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
-    iconSize: z.enum(["tiny", "mini", "small", "medium", "large", "xlarge"]),
+    iconSize: shortcutIconSizeSchema,
     iconShape: z.enum(["circle", "rounded", "squircle", "soft"])
   }).strict()
 }).strict();

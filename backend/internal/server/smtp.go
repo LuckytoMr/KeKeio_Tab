@@ -13,6 +13,8 @@ import (
 	"time"
 )
 
+const smtpSendTimeout = 25 * time.Second
+
 type SMTPTestInput struct {
 	Host      string `json:"host"`
 	Port      int    `json:"port"`
@@ -78,58 +80,86 @@ func sendSMTP(ctx context.Context, input SMTPTestInput, subject, body string) er
 	if input.Host == "" || input.Port < 1 || input.Port > 65535 || !oneOf(input.TLS, "none", "starttls", "tls") || !validEmail(input.From) || !validEmail(input.Recipient) || strings.ContainsAny(subject, "\r\n") {
 		return fmt.Errorf("invalid SMTP test settings")
 	}
+
+	// TCP 建连后的 greeting、TLS、认证与投递共享同一个总截止时间。
+	sendContext, cancel := context.WithTimeout(ctx, smtpSendTimeout)
+	defer cancel()
+
 	address := net.JoinHostPort(input.Host, strconv.Itoa(input.Port))
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
-	var client *smtp.Client
-	if input.TLS == "tls" {
-		connection, err := tls.DialWithDialer(dialer, "tcp", address, &tls.Config{MinVersion: tls.VersionTLS12, ServerName: input.Host})
-		if err != nil {
+	connection, err := dialer.DialContext(sendContext, "tcp", address)
+	if err != nil {
+		return smtpContextError(sendContext, err)
+	}
+	return sendSMTPConnection(sendContext, connection, input, subject, body)
+}
+
+func sendSMTPConnection(sendContext context.Context, connection net.Conn, input SMTPTestInput, subject, body string) error {
+	defer connection.Close()
+
+	if deadline, ok := sendContext.Deadline(); ok {
+		if err := connection.SetDeadline(deadline); err != nil {
 			return err
-		}
-		client, err = smtp.NewClient(connection, input.Host)
-		if err != nil {
-			_ = connection.Close()
-			return err
-		}
-	} else {
-		connection, err := dialer.DialContext(ctx, "tcp", address)
-		if err != nil {
-			return err
-		}
-		client, err = smtp.NewClient(connection, input.Host)
-		if err != nil {
-			_ = connection.Close()
-			return err
-		}
-		if input.TLS == "starttls" {
-			if err := client.StartTLS(&tls.Config{MinVersion: tls.VersionTLS12, ServerName: input.Host}); err != nil {
-				_ = client.Close()
-				return err
-			}
 		}
 	}
+	// net/smtp 的各阶段不接收 context；请求取消时关闭连接以立即解除阻塞。
+	stopContextClose := context.AfterFunc(sendContext, func() {
+		_ = connection.Close()
+	})
+	defer stopContextClose()
+
+	smtpConnection := connection
+	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: input.Host}
+	if input.TLS == "tls" {
+		tlsConnection := tls.Client(connection, tlsConfig)
+		if err := tlsConnection.HandshakeContext(sendContext); err != nil {
+			return smtpContextError(sendContext, err)
+		}
+		smtpConnection = tlsConnection
+	}
+
+	client, err := smtp.NewClient(smtpConnection, input.Host)
+	if err != nil {
+		return smtpContextError(sendContext, err)
+	}
 	defer client.Close()
+
+	if input.TLS == "starttls" {
+		if err := client.StartTLS(tlsConfig); err != nil {
+			return smtpContextError(sendContext, err)
+		}
+	}
 	if input.Username != "" {
 		if err := client.Auth(smtp.PlainAuth("", input.Username, input.Password, input.Host)); err != nil {
-			return err
+			return smtpContextError(sendContext, err)
 		}
 	}
 	from, _ := mail.ParseAddress(input.From)
 	recipient, _ := mail.ParseAddress(input.Recipient)
 	if err := client.Mail(from.Address); err != nil {
-		return err
+		return smtpContextError(sendContext, err)
 	}
 	if err := client.Rcpt(recipient.Address); err != nil {
-		return err
+		return smtpContextError(sendContext, err)
 	}
 	writer, err := client.Data()
 	if err != nil {
-		return err
+		return smtpContextError(sendContext, err)
 	}
 	message := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n%s", from.Address, recipient.Address, subject, body)
 	if _, err := writer.Write([]byte(message)); err != nil {
 		_ = writer.Close()
-		return err
+		return smtpContextError(sendContext, err)
 	}
-	return writer.Close()
+	if err := writer.Close(); err != nil {
+		return smtpContextError(sendContext, err)
+	}
+	return nil
+}
+
+func smtpContextError(ctx context.Context, err error) error {
+	if contextErr := ctx.Err(); contextErr != nil {
+		return contextErr
+	}
+	return err
 }

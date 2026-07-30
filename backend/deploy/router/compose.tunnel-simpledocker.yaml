@@ -1,0 +1,61 @@
+services:
+  caddy:
+    environment:
+      KEKEIO_ADMIN_HOST: "${KEKEIO_ADMIN_HOST:?Set the router LAN IP used by the local HTTPS administration URL}"
+      KEKEIO_TUNNEL_ORIGIN_HOST: "${KEKEIO_TUNNEL_ORIGIN_HOST:?Set the random origin-only HTTP Host value}"
+    expose:
+      - "8081"
+    ports:
+      - "${KEKEIO_TUNNEL_ORIGIN_BIND:?Set the verified Docker bridge gateway}:${KEKEIO_TUNNEL_ORIGIN_PORT:-18081}:8081/tcp"
+    volumes:
+      - ./Caddyfile.tunnel:/etc/caddy/Caddyfile:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-T", "2", "-O", "/dev/null", "http://127.0.0.1:8081/health/live"]
+      interval: 30s
+      timeout: 3s
+      start_period: 30s
+      retries: 3
+
+  cloudflared:
+    image: "${KEKEIO_CLOUDFLARED_IMAGE:?Set a fixed cloudflared image tag in the deployment .env file}"
+    container_name: cloudflared-tab
+    restart: unless-stopped
+    stop_grace_period: 30s
+    depends_on:
+      caddy:
+        condition: service_healthy
+    network_mode: bridge
+    command:
+      - tunnel
+      - --no-autoupdate
+      - --metrics
+      - 0.0.0.0:20241
+      - run
+      - --token-file
+      - /run/secrets/cloudflare-tunnel-token
+    volumes:
+      - type: bind
+        source: "${KEKEIO_CLOUDFLARED_TOKEN_FILE:?Set the protected Tunnel token file path}"
+        target: /run/secrets/cloudflare-tunnel-token
+        read_only: true
+        bind:
+          create_host_path: false
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD", "cloudflared", "tunnel", "--metrics", "127.0.0.1:20241", "ready"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

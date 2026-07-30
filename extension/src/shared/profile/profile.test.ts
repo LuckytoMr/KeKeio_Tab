@@ -29,7 +29,7 @@ describe("profile mutations", () => {
     const profile = createDefaultProfile();
 
     expect(profile.theme.columns).toBe(8);
-    expect(profile.theme.iconSize).toBe("tiny");
+    expect(profile.theme.iconSize).toBe("mini");
     expect(profile.theme.iconShape).toBe("circle");
   });
 

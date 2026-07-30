@@ -63,7 +63,7 @@ describe("migrateProfile", () => {
     expect(migrated.wallpaper.overlayOpacity).toBeLessThanOrEqual(0.2);
     expect(migrated.theme.columns).toBe(6);
     expect(migrated.theme.rows).toBe(2);
-    expect(migrated.theme.iconSize).toBe("tiny");
+    expect(migrated.theme.iconSize).toBe("mini");
     expect(migrated.theme.iconShape).toBe("circle");
     expect(migrated.wallpaper.rotationIntervalSeconds).toBe(60);
     expect(migrated.wallpaper.rotationSource).toBe("selected");
@@ -86,7 +86,27 @@ describe("migrateProfile", () => {
     });
 
     expect(migrated.theme.columns).toBe(8);
-    expect(migrated.theme.iconSize).toBe("tiny");
+    expect(migrated.theme.iconSize).toBe("mini");
+    expect(migrated.theme.iconShape).toBe("circle");
+  });
+
+  it("moves the immediately previous untouched defaults to the corrected small default", () => {
+    const migrated = migrateProfile({
+      ...migrateProfile(undefined),
+      theme: {
+        styleId: "quark-flow",
+        density: "comfortable",
+        sidebarSide: "left",
+        showBrand: false,
+        columns: 8,
+        rows: 2,
+        iconSize: "tiny",
+        iconShape: "circle"
+      }
+    });
+
+    expect(migrated.theme.columns).toBe(8);
+    expect(migrated.theme.iconSize).toBe("mini");
     expect(migrated.theme.iconShape).toBe("circle");
   });
 
@@ -108,6 +128,18 @@ describe("migrateProfile", () => {
     expect(migrated.theme.columns).toBe(6);
     expect(migrated.theme.iconSize).toBe("medium");
     expect(migrated.theme.iconShape).toBe("squircle");
+  });
+
+  it.each(["large", "xlarge"] as const)("maps the removed %s size to the supported large size", (iconSize) => {
+    const migrated = migrateProfile({
+      ...migrateProfile(undefined),
+      theme: {
+        ...migrateProfile(undefined).theme,
+        iconSize
+      }
+    } as any);
+
+    expect(migrated.theme.iconSize).toBe("medium");
   });
 
   it("upgrades old generated text icons to automatic favicons", () => {

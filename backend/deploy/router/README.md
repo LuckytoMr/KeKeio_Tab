@@ -1,205 +1,457 @@
-# 路由器 Docker 部署
+# 小米万兆路由器 Docker 与 Cloudflare Tunnel 部署
 
-该目录是 KeKeIO Tab 后端的正式部署入口。默认拓扑：
+本目录是 KeKeIO Tab 后端的正式路由器部署入口。针对小米万兆路由器、SimpleDocker、`linux/arm64` 和 Cloudflare Tunnel，推荐拓扑如下：
 
 ```text
-https://tab.kekeio.com:443
-  -> 路由器公网 TCP 443
-  -> Docker 主机 TCP 8443
-  -> Caddy 容器 TCP 443
-  -> backend 容器 TCP 9009
+公网用户
+  -> Cloudflare HTTPS
+  -> cloudflared 独立容器
+  -> Caddy :8081 公网白名单入口
+  -> backend:9009
+
+局域网管理员
+  -> https://路由器LAN地址:8443
+  -> Caddy 本地 CA HTTPS 管理入口
+  -> backend:9009
 ```
 
-客户端始终访问 `https://tab.kekeio.com`，不会看到 `8443` 或 `9009`。外网访问根地址会返回后端 liveness 状态，允许的局域网来源会跳转到后台。`9009` 只属于后端和反向代理之间的上游链路，不得设置 WAN 端口转发。
+公网入口只允许 `/`、`/api/v1/*`、账号验证/重置资源和健康端点。`/admin*`、`/install*`、`/api/admin/*` 永远不会进入 Tunnel。后端 `9009` 不发布到 WAN。
 
-## 前置条件
+## 必须先处理的安全事项
 
-- 路由器或 Docker 主机架构为 `linux/amd64` 或 `linux/arm64`，并使用 Docker Compose v2；ARMv7、MIPS 镜像不在发布范围内。
-- 数据目录使用本地 Linux 文件系统（优先 ext4）。不要把 SQLite 数据放在 FAT/exFAT、权限映射不完整的 SMB/NFS 或不可靠的网络盘上。
-- `tab.kekeio.com` 的 A 记录指向路由器公网 IPv4。只有 IPv6 标准端口 `80/443` 也能到达 Caddy 时才发布 AAAA。
-- 私有 GHCR 镜像需要一个具有 `read:packages` 权限的 GitHub PAT。
+1. 用户消息中出现过的 Cloudflare Tunnel Token 已经泄露。先在 Cloudflare 控制台轮换 Token，并强制断开旧连接；若 Tunnel 尚未投入生产，直接删除后重新创建最省事。
+2. 不要再使用 `--network container:kekeio-tab`，也不要把它改成 `container:kekeio-tab-backend` 或 `container:kekeio-tab-caddy`。共享 namespace 会绕过 Caddy 路径白名单，甚至让后端把请求误认为 loopback 或可信代理。
+3. 新 Token 只写入路由器上的权限受限文件，不放进命令参数、`.env`、Compose 环境变量、Git、聊天或截图。
+4. 不要把 SimpleDocker 管理页面、Docker socket、后端 `9009`、Tunnel metrics `20241` 暴露到 Tunnel 或 WAN。
+5. 截图中的 Docker Engine `20.10.17` 已非常旧。只运行来源可信、固定版本、校验过摘要的镜像；不要在路由器上构建不可信 Dockerfile。优先等待小米固件或可信维护方提供引擎更新，不要用陈旧的 SimpleDocker 公共源码覆盖当前安装。
 
-## 1. 准备环境文件和目录
+## 当前设备与 SimpleDocker 结论
+
+截图确认设备为 `linux/arm64`、4 核、内核 `5.4.164`、Docker Engine `20.10.17`，Docker 数据目录位于 `/mnt/usb-24aeefbb/mi_docker/lib/docker`。架构与本项目 ARM64 镜像匹配。
+
+公开的 [SimpleDocker 仓库](https://gitee.com/taoes_admin/SimpleDocker) 已标记关闭，公开 Release 最高只到 `0.0.7.1`；同一路由器历史部署记录使用的是 `0.0.7.2`。因此公开源码不是当前安装包的精确来源，不建议自行替换或“升级”。Docker 命令应在 SimpleDocker 的管理终端中运行，不是在受限的 OpenWrt 根 Shell 中运行。
+
+## 部署文件
+
+- `compose.yaml`：后端和 Caddy 的基础拓扑。
+- `compose.tunnel.yaml`：标准 Docker 网络可正常出网时使用。
+- `compose.tunnel-simpledocker.yaml`：小米/SimpleDocker 推荐兼容方案；`cloudflared` 使用内置 `bridge` 出网。
+- `Caddyfile.tunnel`：Tunnel 公网白名单与 LAN 管理入口严格分离。
+- `router.env.example`：不含凭据的环境样例。
+
+## 1. 检查运行环境
+
+在 SimpleDocker 管理终端执行：
 
 ```sh
-# Git 仓库中：cd backend/deploy/router
-# 后端 Release ZIP 解压后：cd deploy/router
+uname -m
+docker version
+docker compose version
+docker-compose version
+docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}'
+```
+
+预期架构为 `aarch64` 或 `arm64`。记录最后一条命令输出的默认 bridge 网关，后面必须写入 `KEKEIO_TUNNEL_ORIGIN_BIND`，不要假定它一定是 `172.17.0.1`。
+
+优先使用 `docker compose`。如果只有 `docker-compose`，把后续命令中的 `docker compose` 替换成 `docker-compose`；两者都没有时，先通过 SimpleDocker 提供的可信安装方式补齐 Compose，不能只启动后端后让 Tunnel 直连 `9009`。
+
+## 2. 准备完整 ARM64 离线镜像
+
+推荐下载 Release 中的完整包：
+
+```text
+kekeio-tab-router-arm64.tar
+kekeio-tab-router-arm64.tar.sha256
+```
+
+它包含：
+
+```text
+kekeio-tab:arm64
+caddy:2.11.4-alpine
+cloudflare/cloudflared:2026.7.3
+```
+
+把 tar 和校验文件复制到路由器同一目录后执行：
+
+```sh
+sha256sum -c kekeio-tab-router-arm64.tar.sha256
+docker load -i kekeio-tab-router-arm64.tar
+docker image inspect kekeio-tab:arm64 --format '{{.Os}}/{{.Architecture}}'
+docker image inspect caddy:2.11.4-alpine --format '{{.Os}}/{{.Architecture}}'
+docker image inspect cloudflare/cloudflared:2026.7.3 --format '{{.Os}}/{{.Architecture}}'
+```
+
+三个结果都必须是 `linux/arm64`。
+
+用户已有的命令仍可导入仅含应用的旧包：
+
+```sh
+docker load -i kekeio-tab-docker-arm64.tar
+```
+
+但该 tar 不包含 Caddy 和 cloudflared。完全离线部署时必须提前另外导入这两个固定版本镜像；不要让旧 Docker 临时拉取浮动 `latest`。
+
+## 3. 准备目录和环境
+
+将后端 Release ZIP 的 `deploy/router` 目录复制到路由器，例如：
+
+```text
+/mnt/usb-24aeefbb/mi_docker/tab/deploy/router
+```
+
+进入该目录后：
+
+```sh
 cp router.env.example .env
-```
-
-编辑 `.env`，在线 GHCR 路径把 `KEKEIO_IMAGE` 改成 Actions 已发布的 `v*` 或 `sha-<完整提交SHA>` 标签；离线 ARM64 路径在加载 tar 后设置为 `KEKEIO_IMAGE=kekeio-tab:arm64`。同时确认数据路径、真实 LAN CIDR 和 Docker `/29` 网段。正式扩展把服务地址固定为 `https://tab.kekeio.com`，因此 `KEKEIO_DOMAIN` 必须保持 `tab.kekeio.com`；只有同时修改并重建扩展的 fork 才能使用其他域名。不要把浮动 `latest` 作为常规生产版本。然后创建两个逻辑独立的持久目录；真正抵御磁盘损坏时，应把 `KEKEIO_BACKUP_DIR` 放到第二块介质，或定期复制到另一台设备/离机存储：
-
-```sh
 mkdir -p /mnt/usb-24aeefbb/mi_docker/tab/data
 mkdir -p /mnt/usb-24aeefbb/mi_docker/tab/backups
+mkdir -p /mnt/usb-24aeefbb/mi_docker/tab/secrets
 chown -R 10001:10001 /mnt/usb-24aeefbb/mi_docker/tab/data
 chown -R 10001:10001 /mnt/usb-24aeefbb/mi_docker/tab/backups
 chmod 700 /mnt/usb-24aeefbb/mi_docker/tab/data
 chmod 700 /mnt/usb-24aeefbb/mi_docker/tab/backups
+chmod 700 /mnt/usb-24aeefbb/mi_docker/tab/secrets
 ```
 
-镜像内后端以 UID/GID `10001` 运行。bind mount 会覆盖镜像目录本身的属主，跳过上述授权会导致数据库、secrets 或安装码创建失败。Compose 禁止自动创建缺失的宿主目录；后端还会在启动时对 `/backups` 执行写入、`fsync`、删除探测，失败会直接退出，避免“服务 healthy 但备份持续失败”。
+数据目录必须位于支持 SQLite 锁、WAL、`fsync`、原子 rename 和 Unix 权限的本地 Linux 文件系统，优先 ext4。不要使用 FAT/exFAT、权限映射不完整的 SMB/NFS 或不可靠网络盘。
 
-## 2. 加载离线 ARM64 镜像并启动完整 Compose+Caddy 拓扑
-
-从 Actions 的 `kekeio-tab-release` 下载并解压 `kekeio-tab-docker-arm64.tar`，复制到路由器后执行：
-
-```sh
-docker load -i kekeio-tab-docker-arm64.tar
-docker image inspect kekeio-tab:arm64
-```
-
-在 `.env` 中设置：
+编辑 `.env`，至少核对：
 
 ```text
 KEKEIO_IMAGE=kekeio-tab:arm64
+KEKEIO_ADMIN_HOST=<路由器真实LAN地址>
+KEKEIO_HTTP_BIND=<路由器真实LAN地址>
+KEKEIO_HTTPS_BIND=<路由器真实LAN地址>
+KEKEIO_ADMIN_NETWORKS=<真实且最小的管理LAN/VLAN>
+KEKEIO_ADMIN_ALLOWED_CIDRS=127.0.0.1/32,::1/128,<真实且最小的管理LAN/VLAN>
+KEKEIO_TUNNEL_ORIGIN_HOST=origin-<前32个随机十六进制字符>.<后32个随机十六进制字符>.invalid
+KEKEIO_TUNNEL_ORIGIN_BIND=<上一步查到的默认bridge网关>
 ```
 
-然后运行：
+在可信终端生成 256 位随机源站 Host，把输出完整填入 `.env` 中已有的 `KEKEIO_TUNNEL_ORIGIN_HOST=`，不要使用示例字面值：
 
 ```sh
-docker compose --env-file .env -f compose.yaml up -d --pull never
-docker compose --env-file .env -f compose.yaml logs backend
+origin_hex="$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')"
+printf 'origin-%s.%s.invalid\n' \
+  "$(printf '%s' "$origin_hex" | cut -c1-32)" \
+  "$(printf '%s' "$origin_hex" | cut -c33-64)"
+unset origin_hex
+chmod 600 .env
 ```
 
-离线 tar 不需要登录私有 GHCR，也不要执行 `docker compose pull`。`--pull never` 让镜像未在本地时直接失败而非访问网络；因此完全离线时 `caddy:2.11.4-alpine` 也必须已经在本地镜像缓存中。Compose 会自行创建 `kekeio-tab-edge` bridge 网络，无需手工 `docker network create`，并会继续使用 `.env` 中精确的 `KEKEIO_TRUSTED_PROXIES=172.30.88.2/32`（或随自定义静态 Caddy IP 相应收窄的 `/32`）。`9009` 仍只是后端 HTTP 上游端口，安装页、后台和正式扩展必须经过该 Compose+Caddy 的可信 HTTPS 入口；不要把 WAN `9009` 直接暴露到公网。
+该值不是 Cloudflare Token，但它是 Tunnel 到 Caddy 的共享源站鉴权值，只应保存在受限 `.env` 和 Cloudflare Published application 设置中，不要发布到仓库、聊天或截图。即使旧 Docker 意外让 `18081` 可被局域网或其他容器访问，请求也必须同时猜中该随机 Host 才会进入公网 API 白名单。
 
-### 可选：SimpleDocker bridge 健康检查/已有 HTTPS 宿主代理上游
-
-下面的裸 bridge 容器只适合访问 `/health/live`，或由已经具备 HTTPS、路径白名单和精确 trusted-proxy 配置的宿主代理作为受限上游使用。它不是 `/install` 或 `/admin` 的部署入口；首次安装和后台始终使用上面的 Compose+Caddy。将 `192.168.50.1` 替换为当前 Docker 主机的 LAN IP：
-
-```sh
-docker rm -f kekeio-tab-health 2>/dev/null || true
-docker run -d \
-  --name kekeio-tab-health \
-  --network bridge \
-  --restart unless-stopped \
-  -p 192.168.50.1:9009:9009 \
-  --read-only \
-  --tmpfs /tmp:rw,noexec,nosuid,size=64m \
-  --cap-drop ALL \
-  --security-opt no-new-privileges:true \
-  --pids-limit 128 \
-  -e 'FULLPRO_ADMIN_ALLOWED_CIDRS=127.0.0.1/32,::1/128,192.168.50.0/24' \
-  -v /mnt/usb-24aeefbb/mi_docker/tab/data:/data:rw \
-  -v /mnt/usb-24aeefbb/mi_docker/tab/backups:/backups:rw \
-  kekeio-tab:arm64
-```
-
-不得改成全接口 `-p 9009:9009`。裸 bridge 容器没有 Compose 中固定的 Caddy 地址，不能臆造 `FULLPRO_TRUSTED_PROXIES`；已有 HTTPS 宿主代理若要提供安装或后台，必须使用第 6 节的 `compose.host-proxy.yaml`，并把 `.env` 中的可信代理收窄为实际 bridge gateway 的精确 `/32`。
-
-## 3. 私有 GHCR 与完整 Compose 部署
-
-```sh
-echo "$GHCR_TOKEN" | docker login ghcr.io -u LuckytoMr --password-stdin
-docker compose --env-file .env -f compose.yaml pull
-docker compose --env-file .env -f compose.yaml up -d
-docker compose --env-file .env -f compose.yaml logs backend
-```
-
-首次启动日志会打印一次性安装码，并把它保存到数据目录的 `install-code`。Docker 健康检查使用 `/health/live`；Caddy 会等待该检查通过后启动。安装完成前 `/health/ready` 返回 503 是正常的 readiness 门禁。
-
-## 4. 路由器端口与 DNS
-
-如果 Docker 运行在一台独立 LAN 主机（例如 `192.168.50.9`），按下表添加 IPv4 TCP 转发：
-
-| 名称 | 协议 | 外部端口 | 内部 IP | 内部端口 |
-|---|---|---:|---|---:|
-| KeKeIO HTTP | TCP | 80 | Docker 主机 LAN IP | 8080 |
-| KeKeIO HTTPS | TCP | 443 | Docker 主机 LAN IP | 8443 |
-| KeKeIO HTTP/3（可选） | UDP | 443 | Docker 主机 LAN IP | 8443 |
-
-外部端口仍然是标准 `80/443`，所以域名不需要端口；`8080/8443` 只是路由器转发后的宿主机端口。
-
-如果 Docker 就运行在路由器本机：
-
-- 宿主机 `80/443` 未占用时，可把 `.env` 中的 `KEKEIO_HTTP_PORT`/`KEKEIO_HTTPS_PORT` 直接改成 `80/443`，只在 WAN 防火墙放行对应端口。
-- 宿主机 `80/443` 已被路由器管理页面占用时，保留 `8080/8443`，使用路由器的“本机端口重定向/DNAT”把 WAN `80/443` 重定向到本机 `8080/8443`。部分家用路由器的“转发到内网设备”页面不能把目标设为路由器自身，此时需要系统防火墙规则，而不是普通客户端端口转发。
-
-DNS 只负责把域名解析成 IP，不负责端口转换。本部署只支持 Cloudflare“仅 DNS”；不要直接启用橙云代理，否则 Caddy 看到的是 Cloudflare 边缘地址，LAN 管理匹配、客户端审计和限流都会失真。若未来需要橙云，必须另外维护 Cloudflare trusted proxies，并为 LAN 配置绕过 Cloudflare 的直连 split DNS。
-
-IPv6 通常不做 NAT。AAAA 记录启用前必须确认外部 TCP `443` 能以标准端口直达 Caddy；只开放 `8443` 却发布 AAAA 会让部分客户端优先 IPv6 后连接失败。
-
-## 5. 完成安装
-
-局域网直接打开 `https://tab.kekeio.com` 会跳转到后台；首次安装也可直接打开：
+以下值应保持精确：
 
 ```text
-https://tab.kekeio.com/install
+KEKEIO_CADDY_IP=172.30.88.2
+KEKEIO_BACKEND_IP=172.30.88.3
+KEKEIO_TRUSTED_PROXIES=172.30.88.2/32
 ```
 
-如果 LAN 不能回流公网地址，可使用 split DNS，但必须同时解决标准端口：
+如果 `172.30.88.0/29` 与 LAN、VPN 或现有 Docker 网络重叠，整体换成一个不重叠的 `/29`，并同步修改三个静态地址。不要把 Docker 子网、`172.17.0.0/16` 或 cloudflared 地址加入管理网和可信代理。
 
-- 域名指向独立 Docker 主机时，把 `.env` 的 `KEKEIO_HTTP_PORT`/`KEKEIO_HTTPS_PORT` 改为 `80/443`，确保该主机端口未被占用。
-- 保留主机 `8080/8443` 时，域名应指向具有 LAN 侧 `80/443 → Docker 主机 8080/8443` DNAT/redirect 的路由器地址。
+## 4. 创建新的 Token 文件
 
-仅把域名解析到监听 `8443` 的主机不会自动把浏览器的标准 `443` 转过去。不要修改扩展中的正式域名。
+先在 Cloudflare 控制台创建或重建 Tunnel，复制新 Token。不要执行控制台给出的含明文 Token 的 `docker run` 命令。
+
+在 SimpleDocker 终端用无回显输入写入：
+
+```sh
+token_file=/mnt/usb-24aeefbb/mi_docker/tab/secrets/cloudflare-tunnel-token
+umask 077
+printf '粘贴新的 Tunnel Token（输入不可见），然后按回车：' >&2
+trap 'stty echo' EXIT INT TERM
+stty -echo
+IFS= read -r tunnel_token
+stty echo
+trap - EXIT INT TERM
+printf '\n' >&2
+printf '%s' "$tunnel_token" > "$token_file"
+unset tunnel_token
+chown 65532:65532 "$token_file"
+chmod 400 "$token_file"
+stat -c '%u:%g %a %n' "$token_file"
+```
+
+预期权限为：
+
+```text
+65532:65532 400 .../cloudflare-tunnel-token
+```
+
+不要用 `cat`、`echo`、`docker inspect` 或日志回显 Token。若 USB 文件系统无法保存上述属主和权限，停止部署并先换用合适文件系统。
+
+## 5. 选择 Tunnel 网络方案
+
+### 小米/SimpleDocker 推荐方案
+
+同一路由器历史项目发现自定义 Compose bridge 可能出现出网兼容问题，因此优先让 cloudflared 单独使用 Docker 内置 `bridge`，再通过只含公网白名单的 Caddy 专用端口访问应用：
+
+```sh
+docker compose -p kekeio-tab \
+  --env-file .env \
+  -f compose.yaml \
+  -f compose.tunnel-simpledocker.yaml \
+  config
+```
+
+确认配置能解析且输出中没有 Token 明文后启动：
+
+```sh
+docker compose -p kekeio-tab \
+  --env-file .env \
+  -f compose.yaml \
+  -f compose.tunnel-simpledocker.yaml \
+  up -d --pull never
+```
+
+若旧 Compose 不认识 `--pull never`，先逐一确认三个固定镜像都已存在，再删除该参数重试。不要改用 `latest`。
+
+该方案把 Caddy 的 `8081` 只绑定到默认 bridge 网关，例如 `172.17.0.1:18081`。由于旧 Docker 的端口隔离较弱，仍必须从真实 LAN 实测 `/admin`、`/install` 和 `/api/admin/*` 均为 404；专用监听器本身也已硬编码为只有公网路径白名单。
+
+### 标准 Docker 方案
+
+如果以下联网测试确认 `kekeio-tab-edge` 能稳定出网，可避免宿主端口并让 cloudflared 直接加入该独立网络：
+
+```sh
+docker compose -p kekeio-tab \
+  --env-file .env \
+  -f compose.yaml \
+  -f compose.tunnel.yaml \
+  up -d --pull never
+```
+
+标准方案中 cloudflared 固定为 `172.30.88.4`，但后端仍只信任 Caddy 的 `172.30.88.2/32`。任何情况下都不能让 cloudflared 直连 backend。
+
+## 6. 配置 Cloudflare Published application
+
+在 Cloudflare 控制台进入 `Networking -> Tunnels`，打开新 Tunnel，添加 Published application：
+
+```text
+Hostname: tab.kekeio.com
+Type: HTTP
+```
+
+Service URL 按启动方案填写：
+
+```text
+小米/SimpleDocker： http://<KEKEIO_TUNNEL_ORIGIN_BIND>:<KEKEIO_TUNNEL_ORIGIN_PORT>
+标准 Docker：      http://caddy:8081
+```
+
+例如 `.env` 已确认 bridge 网关为 `172.17.0.1` 时，小米方案填写：
+
+```text
+http://172.17.0.1:18081
+```
+
+在 `Additional application settings -> HTTP settings -> HTTP Host Header` 中填写 `.env` 的 `KEKEIO_TUNNEL_ORIGIN_HOST` 完整值。不要填公开域名，也不要留空；Cloudflare 会在 cloudflared 访问 Caddy 时覆盖 Host，Caddy 则拒绝缺少该随机值的直连请求。
+
+不要添加指向 `backend:9009`、`localhost:9009`、路由器管理页面或 SimpleDocker 的任何 Published application。
+
+Tunnel 会建立出站连接，不需要开放或转发 WAN `80/443/8080/8443/9009/18081/20241`。删除指向家庭公网 IP 的旧 A/AAAA 记录，避免绕过 Tunnel；让控制台为 Tunnel 管理对应代理 DNS。Cloudflare 边缘启用 HTTP 到 HTTPS 重定向。
+
+不要给整个域名套一个会阻断扩展 API 的交互式 Cloudflare Access 登录页。若以后需要 Access，应使用独立管理域名并重新设计后端信任边界。
+
+## 7. 首次安装与局域网 HTTPS
+
+Tunnel 配置使用 `Caddyfile.tunnel`：
+
+- 公网 `:8081` 是明文容器内链路，但只允许公网白名单。
+- LAN 管理入口使用 Caddy 本地 CA，外部无法通过 Tunnel 到达。
+
+导出本地 CA 的公开根证书：
+
+```sh
+mkdir -p /mnt/usb-24aeefbb/mi_docker/tab/certs
+docker cp \
+  kekeio-tab-caddy:/data/caddy/pki/authorities/local/root.crt \
+  /mnt/usb-24aeefbb/mi_docker/tab/certs/kekeio-tab-local-root.crt
+sha256sum /mnt/usb-24aeefbb/mi_docker/tab/certs/kekeio-tab-local-root.crt
+```
+
+只把 `root.crt` 安装到专用管理电脑的“受信任的根证书颁发机构”，不要复制或导出 Caddy 的 `root.key`。删除 `caddy-data` 卷会生成新的 CA，届时必须重新核对指纹并替换旧信任。
+
+管理浏览器打开：
+
+```text
+https://<KEKEIO_ADMIN_HOST>:8443/install
+```
+
+若 `.env` 中 `KEKEIO_ADMIN_HOST=192.168.50.1`，地址就是：
+
+```text
+https://192.168.50.1:8443/install
+```
+
+首次启动的一次性安装码位于后端日志和数据目录：
+
+```sh
+docker compose -p kekeio-tab \
+  --env-file .env \
+  -f compose.yaml \
+  -f compose.tunnel-simpledocker.yaml \
+  logs backend
+```
 
 安装向导中：
 
-- 公网 URL 填 `https://tab.kekeio.com`，不要追加 `:9009`、`:8443`。
+- 公网 URL 填 `https://tab.kekeio.com`，不附加 `:9009`、`:8443` 或 `:18081`。
 - 允许来源填精确的 `chrome-extension://<扩展ID>`。
-- 自动备份目录填 `/backups`，让备份与 `/data` 分离。
+- 备份目录填 `/backups`。
+- 必须完成 SMTP 测试；失败时先检查容器 DNS、TCP 出网和系统时间。
 
-安装与管理路由只允许 `.env` 中 `KEKEIO_ADMIN_NETWORKS` 的来源通过 Caddy；后端还会再次校验 `KEKEIO_ADMIN_ALLOWED_CIDRS` 和 HTTPS 转发头。部署完成后必须从真正的外网验证以下地址返回 404：
+安装前 `/health/ready` 返回 503 是正常门禁；安装完成后必须变成 200。
 
-```text
-https://tab.kekeio.com/admin
-https://tab.kekeio.com/install
-https://tab.kekeio.com/api/admin/v1/overview
-```
+## 8. 上线验收
 
-公网会放行根路径 liveness、插件 API、账号验证/重置页、账号页静态资源和健康端点。`KEKEIO_ADMIN_NETWORKS` 与 `KEKEIO_ADMIN_ALLOWED_CIDRS` 必须填写真实、最小的 LAN/VLAN 前缀，不能使用任意私网回退。若所在 Docker/路由器实现把 WAN 来源改写成允许的 LAN 地址，Caddy 与后端都无法可靠区分 WAN/LAN；必须在路由器防火墙隔离管理面，或改用只监听 LAN/VPN 的独立管理入口。
-
-上面的真实外网 404 验证是上线阻断门禁：任一管理地址不是 404，就停止部署，不得把域名交给正式扩展使用。
-
-## 6. 已有反向代理
-
-默认 Compose 不发布后端宿主端口，避免绕过 Caddy 白名单。若现有代理也运行在容器中，优先把它加入 `kekeio-tab-edge` 网络，给它固定 IP，把 `.env` 的 `KEKEIO_TRUSTED_PROXIES` 改成该 IP 的 `/32`，然后只启动后端：
+### 容器与网络
 
 ```sh
-docker compose --env-file .env -f compose.yaml up -d backend
+docker ps --filter name=kekeio-tab --filter name=cloudflared-tab
+docker inspect kekeio-tab-backend --format '{{json .NetworkSettings.Networks}}'
+docker inspect kekeio-tab-caddy --format '{{json .NetworkSettings.Networks}}'
+docker inspect cloudflared-tab --format '{{json .NetworkSettings.Networks}}'
+docker logs --tail 100 cloudflared-tab
 ```
 
-容器代理上游使用 `backend:9009`。若必须使用宿主机代理，先用 `docker network inspect kekeio-tab-edge` 确认实际 bridge gateway，把 `KEKEIO_TRUSTED_PROXIES` 改成该 gateway 的精确 `/32`，再显式启用端口 override：
+小米方案预期：
+
+- backend：仅 `kekeio-tab-edge`。
+- Caddy：仅 `kekeio-tab-edge`。
+- cloudflared：仅内置 `bridge`。
+- 三个容器最终均为 healthy，Cloudflare 控制台显示 Tunnel Healthy。
+
+### Caddy 专用入口
+
+在路由器本机测试，替换为真实 bridge 网关和端口：
 
 ```sh
-docker compose --env-file .env -f compose.yaml -f compose.host-proxy.yaml up -d backend
+origin_host="$(sed -n 's/^KEKEIO_TUNNEL_ORIGIN_HOST=//p' .env | tail -n 1)"
+curl -i http://172.17.0.1:18081/health/live
+curl -i -H "Host: ${origin_host}" http://172.17.0.1:18081/health/live
+curl -i -H "Host: ${origin_host}" http://172.17.0.1:18081/admin
+curl -i -H "Host: ${origin_host}" http://172.17.0.1:18081/install
+curl -i -H "Host: ${origin_host}" http://172.17.0.1:18081/api/admin/v1/auth/session
+unset origin_host
 ```
 
-宿主机代理上游使用 `127.0.0.1:9009`。Docker Engine 低于 28 时，同一二层网络的其他主机可能访问仅绑定 localhost 的发布端口；旧引擎不要使用这个 override，应改用同网络容器代理或额外防火墙隔离。代理必须清除客户端伪造的转发头，再设置可信的 `X-Forwarded-For`、`X-Forwarded-Proto`，并复制本目录 Caddyfile 的公网路径白名单（包括 `/account/assets/*`）。
+预期依次为 `404、200、404、404、404`。第一项验证缺少随机源站 Host 时连健康端点也被拒绝；后四项验证正确 Host 只能进入公网白名单，仍不能进入管理面。如果路由器没有 `curl`，可从另一个带 curl 的诊断容器测试；不要为了测试把 `18081` 改绑到 `0.0.0.0`。
 
-## 7. 升级、回滚与备份
+再从真实 LAN 设备尝试 `http://<bridge网关>:18081/health/live` 和 `/admin`，两者都必须返回 404。即使旧 Docker/路由器把该地址路由到 LAN，未知随机 Host 的直连请求也不能进入公网 API；任一路径不是 404，立即停止上线。
 
-### 在线 GHCR 路径
+### 公网
 
-生产更新优先使用版本标签或镜像 digest，不要长期依赖浮动的 `latest`：
+用手机关闭 Wi-Fi 后执行或访问：
 
 ```sh
-docker image inspect "$(docker inspect kekeio-tab-backend --format '{{.Image}}')" --format '{{json .RepoDigests}}'
-docker image inspect "$(docker inspect kekeio-tab-caddy --format '{{.Image}}')" --format '{{json .RepoDigests}}'
-docker compose --env-file .env -f compose.yaml pull
-docker compose --env-file .env -f compose.yaml up -d
+curl -i https://tab.kekeio.com/health/live
+curl -i https://tab.kekeio.com/health/ready
+curl -i https://tab.kekeio.com/admin
+curl -i https://tab.kekeio.com/install
+curl -i https://tab.kekeio.com/api/admin/v1/auth/session
 ```
 
-升级前在后台创建完整备份并保存恢复口令，同时记录后端和 Caddy 两个镜像 digest。若升级未改变数据库 schema，可把 `.env` 的两个镜像都改回旧标签/digest 后重新创建容器；若新版本已经迁移数据库，必须先恢复与旧版本兼容的迁移前快照或完整备份，旧二进制会拒绝未来 schema。
+安装完成后的预期为 `200、200、404、404、404`。任一管理入口返回 200、302、401 或 403，都说明请求进入了不该进入的管理链路，必须下线调查。
 
-### 离线 ARM64 tar 路径
-
-升级前在后台创建完整备份并保留当前与上一版 `kekeio-tab-docker-arm64.tar`，不要用新 tar 覆盖旧 tar。加载新 tar 后，将 `.env` 中的 `KEKEIO_IMAGE` 保持/更新为本地固定标签 `kekeio-tab:arm64`，再由同一份 Compose+Caddy 拓扑重建后端：
+最后检查：
 
 ```sh
-docker load -i /path/to/kekeio-tab-docker-arm64-new.tar
-# 编辑 .env：KEKEIO_IMAGE=kekeio-tab:arm64
-docker compose --env-file .env -f compose.yaml up -d --pull never
+docker inspect cloudflared-tab --format '{{json .Config.Env}}'
+docker inspect cloudflared-tab --format '{{json .Config.Cmd}}'
 ```
 
-回滚时加载保留的旧 tar，再次把 `.env` 中的 `KEKEIO_IMAGE` 设为 `kekeio-tab:arm64` 后执行相同命令：
+输出中只能看到 Token 文件路径，不能出现 Token 本身。
+
+## 9. 备份、升级与回滚
+
+升级前：
+
+1. 在后台创建一份完整备份并保存恢复口令。
+2. 把备份复制到第二介质或离机存储。
+3. 记录三个镜像的 ID 和 RepoDigest。
+4. 保留当前与上一版完整 ARM64 tar 及 `.sha256`。
 
 ```sh
-docker load -i /path/to/kekeio-tab-docker-arm64-previous.tar
-# 编辑 .env：KEKEIO_IMAGE=kekeio-tab:arm64
-docker compose --env-file .env -f compose.yaml up -d --pull never
+docker image inspect kekeio-tab:arm64 --format '{{.Id}} {{json .RepoDigests}}'
+docker image inspect caddy:2.11.4-alpine --format '{{.Id}} {{json .RepoDigests}}'
+docker image inspect cloudflare/cloudflared:2026.7.3 --format '{{.Id}} {{json .RepoDigests}}'
 ```
 
-离线升级和回滚不登录 GHCR，也不执行 pull；裸 bridge 容器只用于健康检查或已有 HTTPS 代理的受限上游，不能为它编造安装后台升级流程。不要同时运行两个后端实例访问同一个 SQLite 数据目录。同一物理盘上的 `/data` 与 `/backups` 只提供逻辑隔离，不能替代第二介质或离机备份。
+加载新包后，用原来的两份 Compose 文件重建：
+
+```sh
+docker load -i kekeio-tab-router-arm64-new.tar
+docker compose -p kekeio-tab \
+  --env-file .env \
+  -f compose.yaml \
+  -f compose.tunnel-simpledocker.yaml \
+  up -d --pull never
+```
+
+不要同时运行两个后端实例访问同一个 SQLite 数据目录。若新版本迁移了数据库，二进制回滚前必须恢复与旧版本兼容的迁移前快照或完整备份。
+
+轮换 Tunnel Token 时：先在 Cloudflare 控制台 Rotate，再安全覆盖本地 Token 文件并重建 cloudflared；最后强制断开旧连接并验证新 connector Healthy。
+
+## 10. 常见故障
+
+### Compose 解析失败
+
+先运行：
+
+```sh
+docker compose -p kekeio-tab --env-file .env -f compose.yaml -f compose.tunnel-simpledocker.yaml config
+```
+
+若只有旧 `docker-compose`，替换命令名并保留 `-p kekeio-tab`。旧版本如果不支持 `create_host_path: false`，不要直接删除安全检查；先确保数据、备份和 Token 路径都真实存在，再评估升级 Compose。
+
+### cloudflared 无法连接
+
+检查系统时间、DNS 和出站 TCP/UDP `7844`、HTTPS `443`。`cloudflared` 2026.5.2 之后会在启动时执行连接预检，日志会指出 DNS、QUIC/TCP 或 API 连通性问题。可临时把协议固定为 `http2` 诊断 UDP 7844 被阻断的情况，但解决防火墙后应恢复默认 `auto`。
+
+### 公网返回 502
+
+依次检查：
+
+```sh
+docker ps
+docker logs --tail 100 kekeio-tab-backend
+docker logs --tail 100 kekeio-tab-caddy
+docker logs --tail 100 cloudflared-tab
+```
+
+确认 Cloudflare Service URL 与所选方案一致。绝不能把 502 的“修复”改成直连 `backend:9009`。
+
+### 管理页面证书不受信
+
+确认访问地址中的 IP 与 `KEKEIO_ADMIN_HOST` 完全一致，并重新核对、导入 `kekeio-tab-local-root.crt`。只信任公开根证书，绝不导出私钥。
+
+### SMTP 测试失败
+
+先从后端容器检查 DNS 和目标 SMTP 端口。若小米 Docker 的自定义 bridge 确实无法出网，不要把 backend 加入 cloudflared 的 namespace，也不要放宽可信代理；应修复 Docker NAT/防火墙，或使用 LAN 内可信 SMTP relay。该问题必须在正式开放注册前解决。
+
+### 路由器资源不足
+
+路由器只有 4 核且存储为 USB。保留较小的密码哈希并发，监控 SQLite、WAL、自动备份、访问日志和磁盘真实可用空间。上线前用接近真实大小的数据库执行备份并观察 `/health/ready` 与同步延迟。
+
+## 11. 不使用 Tunnel 的直连模式
+
+只有明确需要 WAN 端口转发时才使用基础 `Caddyfile` 和 `compose.yaml`：
+
+```sh
+docker compose -p kekeio-tab --env-file .env -f compose.yaml up -d
+```
+
+此模式要求域名 A/AAAA、标准 WAN `80/443`、Caddy 证书签发和路由器防火墙全部正确。不要同时保留一个能绕过 Tunnel 的 WAN 直连入口。完整 Tunnel 部署不需要任何 WAN 入站端口。
+
+## 官方参考
+
+- [Cloudflare Tunnel Token 权限、轮换与强制断开](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/configure-tunnels/remote-tunnel-permissions/)
+- [cloudflared Tunnel run 参数与 token-file](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/configure-tunnels/run-parameters/)
+- [Cloudflare Tunnel 防火墙要求](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/configure-tunnels/tunnel-with-firewall/)
+- [Cloudflare Tunnel 监控与 metrics](https://developers.cloudflare.com/tunnel/monitoring/)
+- [Docker 端口发布与旧版本 localhost 风险](https://docs.docker.com/engine/network/port-publishing/)
+- [Docker 默认 bridge 与 legacy links](https://docs.docker.com/engine/network/links/)
+- [Caddy reverse_proxy 可信代理说明](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy)

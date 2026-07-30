@@ -117,4 +117,17 @@ describe("SharedProfileV2", () => {
     expect(hydrated.wallpaper.rotationHistory).toEqual(["mist"]);
     expect(hydrated.schemaVersion).toBe(1);
   });
+
+  it.each(["large", "xlarge"] as const)("accepts legacy shared %s sizes and normalizes them", (iconSize) => {
+    const valid = toSharedProfileV2(createDefaultProfile());
+    const parsed = parseSharedProfileV2({
+      ...valid,
+      theme: {
+        ...valid.theme,
+        iconSize
+      }
+    });
+
+    expect(parsed.theme.iconSize).toBe("medium");
+  });
 });

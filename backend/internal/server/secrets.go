@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 )
 
 type Secrets struct {
@@ -40,9 +39,6 @@ func LoadOrCreateSecrets(path string) (Secrets, bool, error) {
 	} else if !os.IsNotExist(err) {
 		return Secrets{}, false, err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return Secrets{}, false, err
-	}
 	secrets := Secrets{TokenDerivationKey: make([]byte, 32), CookieKey: make([]byte, 32)}
 	if _, err := rand.Read(secrets.TokenDerivationKey); err != nil {
 		return Secrets{}, false, err
@@ -50,32 +46,9 @@ func LoadOrCreateSecrets(path string) (Secrets, bool, error) {
 	if _, err := rand.Read(secrets.CookieKey); err != nil {
 		return Secrets{}, false, err
 	}
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".secrets-*")
-	if err != nil {
-		return Secrets{}, false, err
-	}
-	temporaryPath := temporary.Name()
-	defer func() { _ = os.Remove(temporaryPath) }()
-	if err := temporary.Chmod(0o600); err != nil {
-		_ = temporary.Close()
-		return Secrets{}, false, err
-	}
-	encoder := json.NewEncoder(temporary)
-	if err := encoder.Encode(secrets); err != nil {
-		_ = temporary.Close()
-		return Secrets{}, false, err
-	}
-	if err := temporary.Sync(); err != nil {
-		_ = temporary.Close()
-		return Secrets{}, false, err
-	}
-	if err := temporary.Close(); err != nil {
-		return Secrets{}, false, err
-	}
-	if err := os.Rename(temporaryPath, path); err != nil {
-		return Secrets{}, false, err
-	}
-	if err := os.Chmod(path, 0o600); err != nil {
+	if err := writeFileAtomicDurable(path, ".secrets-*", 0o600, func(writer io.Writer) error {
+		return json.NewEncoder(writer).Encode(secrets)
+	}); err != nil {
 		return Secrets{}, false, err
 	}
 	return secrets, true, nil
@@ -85,32 +58,7 @@ func SaveSecrets(path string, secrets Secrets) error {
 	if path == "" || len(secrets.TokenDerivationKey) != 32 || len(secrets.CookieKey) != 32 {
 		return fmt.Errorf("valid secrets path and 256-bit keys are required")
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".secrets-update-*")
-	if err != nil {
-		return err
-	}
-	temporaryPath := temporary.Name()
-	defer func() { _ = os.Remove(temporaryPath) }()
-	if err := temporary.Chmod(0o600); err != nil {
-		_ = temporary.Close()
-		return err
-	}
-	if err := json.NewEncoder(temporary).Encode(secrets); err != nil {
-		_ = temporary.Close()
-		return err
-	}
-	if err := temporary.Sync(); err != nil {
-		_ = temporary.Close()
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(temporaryPath, path); err != nil {
-		return err
-	}
-	return os.Chmod(path, 0o600)
+	return writeFileAtomicDurable(path, ".secrets-update-*", 0o600, func(writer io.Writer) error {
+		return json.NewEncoder(writer).Encode(secrets)
+	})
 }

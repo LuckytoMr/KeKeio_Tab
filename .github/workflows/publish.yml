@@ -16,6 +16,8 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository_owner }}/kekeio-tab
   NODE_VERSION: '24'
+  CADDY_IMAGE: caddy:2.11.4-alpine
+  CLOUDFLARED_IMAGE: cloudflare/cloudflared:2026.7.3
 
 jobs:
   verify:
@@ -65,6 +67,12 @@ jobs:
         run: |
           go test ./... -count=1
           go vet ./...
+
+      - name: Check reachable Go vulnerabilities
+        working-directory: backend
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
+          govulncheck ./...
 
   package:
     name: Build release archives
@@ -139,6 +147,7 @@ jobs:
           docker run -d \
             --name "${container_name}" \
             --platform linux/arm64 \
+            -e FULLPRO_ADMIN_ALLOWED_CIDRS=127.0.0.1/32 \
             -p 127.0.0.1:9009:9009 \
             kekeio-tab:arm64
 
@@ -152,15 +161,35 @@ jobs:
           docker logs "${container_name}"
           exit 1
 
+      - name: Build complete ARM64 router archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker pull --platform linux/arm64 "${CADDY_IMAGE}"
+          docker pull --platform linux/arm64 "${CLOUDFLARED_IMAGE}"
+          test "$(docker image inspect "${CADDY_IMAGE}" --format '{{.Os}}/{{.Architecture}}')" = "linux/arm64"
+          test "$(docker image inspect "${CLOUDFLARED_IMAGE}" --format '{{.Os}}/{{.Architecture}}')" = "linux/arm64"
+          docker save \
+            --output "${RUNNER_TEMP}/kekeio-tab-router-arm64.tar" \
+            kekeio-tab:arm64 \
+            "${CADDY_IMAGE}" \
+            "${CLOUDFLARED_IMAGE}"
+          test -s "${RUNNER_TEMP}/kekeio-tab-router-arm64.tar"
+
       - name: Create release archives
         run: |
           mkdir -p release
           mv "${RUNNER_TEMP}/kekeio-tab-docker-arm64.tar" release/kekeio-tab-docker-arm64.tar
+          mv "${RUNNER_TEMP}/kekeio-tab-router-arm64.tar" release/kekeio-tab-router-arm64.tar
           cd backend
           zip -qr ../release/kekeio-tab-backend.zip cmd internal admin-ui bin deploy Dockerfile .dockerignore .env.example go.mod go.sum README.md \
             -x 'admin-ui/node_modules/*' 'admin-ui/dist/*' 'admin-ui/coverage/*'
           cd ../extension
           zip -qr ../release/kekeio-tab-extension.zip dist
+          cd ../release
+          for artifact in *.zip *.tar; do
+            sha256sum "${artifact}" > "${artifact}.sha256"
+          done
 
       - name: Upload release archives
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -169,6 +198,7 @@ jobs:
           path: |
             release/*.zip
             release/*.tar
+            release/*.sha256
           if-no-files-found: error
           retention-days: 14
 
@@ -235,4 +265,4 @@ jobs:
       - name: Publish release assets
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${GITHUB_REF_NAME}" release/*.zip release/*.tar --generate-notes --title "KeKeIO Tab ${GITHUB_REF_NAME}"
+        run: gh release create "${GITHUB_REF_NAME}" release/*.zip release/*.tar release/*.sha256 --generate-notes --title "KeKeIO Tab ${GITHUB_REF_NAME}"

@@ -62,6 +62,13 @@ $adminText = Read-WorkspaceText -Paths $adminSources
 $manifestPath = Join-Path $root "extension\public\manifest.json"
 $manifestText = Get-Content -LiteralPath $manifestPath -Raw
 $manifest = $manifestText | ConvertFrom-Json
+$routerDeployRoot = Join-Path $root "backend\deploy\router"
+$tunnelComposeText = Read-WorkspaceText -Paths @(
+    (Join-Path $routerDeployRoot "compose.tunnel.yaml"),
+    (Join-Path $routerDeployRoot "compose.tunnel-simpledocker.yaml")
+)
+$tunnelCaddyText = Get-Content -LiteralPath (Join-Path $routerDeployRoot "Caddyfile.tunnel") -Raw
+$tunnelPublicCaddyText = ($tunnelCaddyText -split '# 管理入口只监听', 2)[0]
 
 Assert-Absent -Name "生产后端不得内置固定管理员口令" -Text $backendText -Pattern '(?i)fixedAdminPassword|ensureFixedAdmin|2231'
 Assert-Present -Name "本地 dev 命令必须显式标注固定测试口令" -Text $localDevCommandText -Pattern 'const\s+localDevelopmentPassword\s*=\s*"2231"'
@@ -77,6 +84,15 @@ Assert-Present -Name "同步写入必须执行版本前置条件" -Text $backend
 Assert-Present -Name "跨端 profile hash 必须使用显式 canonical JSON" -Text $backendText -Pattern 'writeExtensionCanonicalJSON'
 Assert-Present -Name "旧版注册写入口必须强制升级" -Text $backendText -Pattern 'POST /api/auth/register"\s*,\s*a\.handleProtocolUpgradeRequired'
 Assert-Present -Name "旧版配置恢复写入口必须强制升级" -Text $backendText -Pattern 'POST /api/profile/versions/\{id\}/restore"\s*,\s*a\.handleProtocolUpgradeRequired'
+Assert-Absent -Name "Tunnel 不得共享其他容器网络命名空间" -Text $tunnelComposeText -Pattern 'network_mode:\s*container:'
+Assert-Absent -Name "Tunnel Compose 不得保存明文 Token" -Text $tunnelComposeText -Pattern 'eyJ[A-Za-z0-9_-]{80,}'
+Assert-Absent -Name "Tunnel Compose 不得通过普通环境变量注入 Token" -Text $tunnelComposeText -Pattern '(?m)^\s*(TUNNEL_TOKEN|CLOUDFLARE_TUNNEL_TOKEN)\s*:'
+Assert-Present -Name "Tunnel 必须从只读文件读取 Token" -Text $tunnelComposeText -Pattern '--token-file'
+Assert-Present -Name "Tunnel 必须配置随机源站 Host 鉴权值" -Text $tunnelComposeText -Pattern 'KEKEIO_TUNNEL_ORIGIN_HOST'
+Assert-Present -Name "Tunnel 必须使用独立的 Caddy 公网监听器" -Text $tunnelCaddyText -Pattern '(?m)^:8081\s*\{'
+Assert-Present -Name "Tunnel 公网监听器必须校验随机源站 Host" -Text $tunnelPublicCaddyText -Pattern 'host\s+\{\$KEKEIO_TUNNEL_ORIGIN_HOST\}'
+Assert-Present -Name "Tunnel 公网监听器必须有默认拒绝" -Text $tunnelPublicCaddyText -Pattern 'respond\s+404'
+Assert-Absent -Name "Tunnel 公网监听器不得包含管理路由" -Text $tunnelPublicCaddyText -Pattern '/admin|/install|/api/admin/'
 
 Assert-Absent -Name "后台源码不得使用 innerHTML" -Text $adminText -Pattern '(?i)\.innerHTML\s*='
 $requiredHosts = @($manifest.host_permissions)

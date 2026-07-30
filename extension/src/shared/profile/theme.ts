@@ -1,15 +1,19 @@
 import type { ThemeSettings } from "./types";
 
 export const shortcutIconSizeOptions = [
-  { id: "tiny", label: "超小" },
-  { id: "mini", label: "迷你" },
-  { id: "small", label: "小" },
-  { id: "medium", label: "中" },
-  { id: "large", label: "大" },
-  { id: "xlarge", label: "超大" }
+  { id: "tiny", label: "迷你" },
+  { id: "mini", label: "小" },
+  { id: "small", label: "中" },
+  { id: "medium", label: "大" }
 ] as const;
 
 export type ShortcutIconSize = (typeof shortcutIconSizeOptions)[number]["id"];
+
+export function normalizeShortcutIconSize(value: unknown, fallback: ShortcutIconSize = "mini"): ShortcutIconSize {
+  if (value === "tiny" || value === "mini" || value === "small" || value === "medium") return value;
+  if (value === "large" || value === "xlarge") return "medium";
+  return fallback;
+}
 
 export const shortcutIconShapeOptions = [
   { id: "squircle", label: "圆角方块" },
@@ -22,126 +26,142 @@ export type ShortcutIconShape = (typeof shortcutIconShapeOptions)[number]["id"];
 
 export type ShortcutIconSizeMetrics = {
   tileSize: number;
-  tileGap: number;
   tileMinHeight: number;
   iconSize: number;
   imageSize: number;
   fallbackFontSize: number;
+  titleFontSize: number;
 };
 
-const metricsBySize: Record<ShortcutIconSize, Record<ThemeSettings["density"], ShortcutIconSizeMetrics>> = {
+export type ShortcutDensityMetrics = {
+  paddingTop: number;
+  paddingBottom: number;
+  contentGap: number;
+  rowGap: number;
+  preferredColumnGap: number;
+};
+
+export const shortcutGridLayout = {
+  contentWidth: 820,
+  paddingInline: 0,
+  titleHeight: 40
+} as const;
+
+const metricsBySize: Record<ShortcutIconSize, ShortcutIconSizeMetrics> = {
   tiny: {
-    comfortable: {
-      tileSize: 74,
-      tileGap: 18,
-      tileMinHeight: 98,
-      iconSize: 56,
-      imageSize: 34,
-      fallbackFontSize: 22
-    },
-    compact: {
-      tileSize: 64,
-      tileGap: 14,
-      tileMinHeight: 86,
-      iconSize: 48,
-      imageSize: 30,
-      fallbackFontSize: 18
-    }
+    tileSize: 56,
+    tileMinHeight: 98,
+    iconSize: 56,
+    imageSize: 34,
+    fallbackFontSize: 22,
+    titleFontSize: 13
   },
   mini: {
-    comfortable: {
-      tileSize: 84,
-      tileGap: 22,
-      tileMinHeight: 108,
-      iconSize: 64,
-      imageSize: 40,
-      fallbackFontSize: 24
-    },
-    compact: {
-      tileSize: 74,
-      tileGap: 16,
-      tileMinHeight: 96,
-      iconSize: 56,
-      imageSize: 34,
-      fallbackFontSize: 22
-    }
+    tileSize: 64,
+    tileMinHeight: 108,
+    iconSize: 64,
+    imageSize: 40,
+    fallbackFontSize: 24,
+    titleFontSize: 14
   },
   small: {
-    comfortable: {
-      tileSize: 96,
-      tileGap: 28,
-      tileMinHeight: 122,
-      iconSize: 82,
-      imageSize: 52,
-      fallbackFontSize: 30
-    },
-    compact: {
-      tileSize: 84,
-      tileGap: 18,
-      tileMinHeight: 104,
-      iconSize: 72,
-      imageSize: 46,
-      fallbackFontSize: 26
-    }
+    tileSize: 82,
+    tileMinHeight: 122,
+    iconSize: 82,
+    imageSize: 52,
+    fallbackFontSize: 30,
+    titleFontSize: 15
   },
   medium: {
-    comfortable: {
-      tileSize: 112,
-      tileGap: 34,
-      tileMinHeight: 136,
-      iconSize: 96,
-      imageSize: 62,
-      fallbackFontSize: 36
-    },
-    compact: {
-      tileSize: 96,
-      tileGap: 22,
-      tileMinHeight: 116,
-      iconSize: 82,
-      imageSize: 52,
-      fallbackFontSize: 30
+    tileSize: 96,
+    tileMinHeight: 136,
+    iconSize: 96,
+    imageSize: 62,
+    fallbackFontSize: 36,
+    titleFontSize: 16
+  }
+};
+
+const densityMetricsByMode: Record<
+  ThemeSettings["density"],
+  Omit<ShortcutDensityMetrics, "rowGap" | "preferredColumnGap"> & {
+    spacingBySize: Record<ShortcutIconSize, Pick<ShortcutDensityMetrics, "rowGap" | "preferredColumnGap">>;
+  }
+> = {
+  comfortable: {
+    paddingTop: 50,
+    paddingBottom: 28,
+    contentGap: 13,
+    spacingBySize: {
+      tiny: { rowGap: 18, preferredColumnGap: 18 },
+      mini: { rowGap: 22, preferredColumnGap: 22 },
+      small: { rowGap: 28, preferredColumnGap: 28 },
+      medium: { rowGap: 34, preferredColumnGap: 34 }
     }
   },
-  large: {
-    comfortable: {
-      tileSize: 128,
-      tileGap: 38,
-      tileMinHeight: 154,
-      iconSize: 112,
-      imageSize: 72,
-      fallbackFontSize: 40
-    },
-    compact: {
-      tileSize: 112,
-      tileGap: 26,
-      tileMinHeight: 132,
-      iconSize: 96,
-      imageSize: 62,
-      fallbackFontSize: 34
-    }
-  },
-  xlarge: {
-    comfortable: {
-      tileSize: 146,
-      tileGap: 42,
-      tileMinHeight: 176,
-      iconSize: 128,
-      imageSize: 84,
-      fallbackFontSize: 46
-    },
-    compact: {
-      tileSize: 128,
-      tileGap: 30,
-      tileMinHeight: 150,
-      iconSize: 112,
-      imageSize: 72,
-      fallbackFontSize: 40
+  compact: {
+    paddingTop: 32,
+    paddingBottom: 20,
+    contentGap: 9,
+    spacingBySize: {
+      tiny: { rowGap: 12, preferredColumnGap: 12 },
+      mini: { rowGap: 14, preferredColumnGap: 14 },
+      small: { rowGap: 16, preferredColumnGap: 16 },
+      medium: { rowGap: 18, preferredColumnGap: 18 }
     }
   }
 };
 
-export function getShortcutIconSizeMetrics(iconSize: ShortcutIconSize, density: ThemeSettings["density"]) {
-  return metricsBySize[iconSize]?.[density] ?? metricsBySize.medium[density];
+export function getShortcutIconSizeMetrics(iconSize: ShortcutIconSize | string | null | undefined) {
+  return metricsBySize[normalizeShortcutIconSize(iconSize)];
+}
+
+export function getShortcutDensityMetrics(
+  density: ThemeSettings["density"],
+  iconSize: ShortcutIconSize | string | null | undefined
+): ShortcutDensityMetrics {
+  const definition = densityMetricsByMode[density];
+  const spacing = definition.spacingBySize[normalizeShortcutIconSize(iconSize)];
+
+  return {
+    paddingTop: definition.paddingTop,
+    paddingBottom: definition.paddingBottom,
+    contentGap: definition.contentGap,
+    ...spacing
+  };
+}
+
+export function getShortcutGridColumnGap(
+  columnCount: number,
+  metrics: ShortcutIconSizeMetrics,
+  preferredColumnGap: number
+) {
+  if (columnCount <= 1) return 0;
+
+  const innerWidth = shortcutGridLayout.contentWidth - shortcutGridLayout.paddingInline * 2;
+  const availableGap = (innerWidth - columnCount * metrics.tileSize) / (columnCount - 1);
+
+  return Math.max(0, Math.min(preferredColumnGap, availableGap));
+}
+
+export function getShortcutGridJustification(density: ThemeSettings["density"], columnCount: number) {
+  return density === "comfortable" && columnCount > 1 ? "space-between" : "center";
+}
+
+export function getShortcutRowHeight(metrics: ShortcutIconSizeMetrics, density: ShortcutDensityMetrics) {
+  const contentHeight = metrics.iconSize + density.contentGap + shortcutGridLayout.titleHeight;
+  return Math.max(metrics.tileMinHeight, contentHeight);
+}
+
+export function getShortcutGridMaxHeight(
+  rows: ThemeSettings["rows"],
+  metrics: ShortcutIconSizeMetrics,
+  density: ShortcutDensityMetrics
+) {
+  const rowHeight = getShortcutRowHeight(metrics, density);
+  const rowGaps = Math.max(0, rows - 1) * density.rowGap;
+
+  return density.paddingTop + rows * rowHeight + rowGaps + density.paddingBottom;
 }
 
 export function getShortcutIconShapeRadius(iconShape: ShortcutIconShape, iconSize: number) {

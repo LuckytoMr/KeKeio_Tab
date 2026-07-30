@@ -145,12 +145,7 @@ func writeAdminV1RestoreIntent(intent adminV1RestoreIntent) error {
 	if err := adminV1WriteFileAtomic(journalPath, append(encoded, '\n'), 0o600); err != nil {
 		return err
 	}
-	if err := syncAdminV1Directory(filepath.Dir(journalPath)); err != nil {
-		_ = os.Remove(journalPath)
-		return err
-	}
 	if err := recordAdminV1RestorePhase(intent, restorePhasePrepared); err != nil {
-		_ = os.Remove(journalPath)
 		return err
 	}
 	return nil
@@ -191,7 +186,7 @@ func recordAdminV1RestorePhase(intent adminV1RestoreIntent, phase string) error 
 	if err := adminV1WriteFileAtomic(path, append(payload, '\n'), 0o600); err != nil {
 		return err
 	}
-	return syncAdminV1Directory(filepath.Dir(path))
+	return nil
 }
 
 func adminV1RestorePhaseCompleted(intent adminV1RestoreIntent) bool {
@@ -351,46 +346,9 @@ func fileExists(path string) bool {
 }
 
 func renameAdminV1File(source, destination string) error {
-	if source == "" || destination == "" {
-		return fmt.Errorf("rename paths are required")
-	}
-	if err := os.Rename(source, destination); err != nil {
-		return err
-	}
-	if err := syncAdminV1Directory(filepath.Dir(source)); err != nil {
-		return err
-	}
-	if filepath.Dir(source) != filepath.Dir(destination) {
-		return syncAdminV1Directory(filepath.Dir(destination))
-	}
-	return nil
+	return renameFileDurable(source, destination)
 }
 
 func removeAdminV1File(path string) error {
-	if path == "" {
-		return nil
-	}
-	err := os.Remove(path)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	return syncAdminV1Directory(filepath.Dir(path))
-}
-
-func syncAdminV1Directory(path string) error {
-	directory, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	err = directory.Sync()
-	closeErr := directory.Close()
-	if runtime.GOOS == "windows" {
-		// Go cannot request FILE_FLAG_BACKUP_SEMANTICS through os.Open. The
-		// Sync call is still attempted; Windows may reject directory flushes.
-		err = nil
-	}
-	return errors.Join(err, closeErr)
+	return removeFileDurable(path)
 }

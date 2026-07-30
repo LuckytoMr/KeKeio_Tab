@@ -1,0 +1,60 @@
+{
+	auto_https disable_redirects
+}
+
+# Tunnel 只进入该明文内网监听器。这里故意不包含任何安装或管理路径。
+:8081 {
+	@local_health {
+		remote_ip 127.0.0.1 ::1
+		path /health/live
+	}
+
+	@public {
+		host {$KEKEIO_TUNNEL_ORIGIN_HOST}
+		path /api/v1/* /account/verify /account/reset /account/assets/* /health/live /health/ready
+	}
+
+	@public_root {
+		host {$KEKEIO_TUNNEL_ORIGIN_HOST}
+		path /
+	}
+
+	route {
+		reverse_proxy @local_health backend:9009
+		reverse_proxy @public_root backend:9009 {
+			rewrite /health/live
+			header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}
+			header_up X-Forwarded-Proto https
+		}
+		reverse_proxy @public backend:9009 {
+			header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}
+			header_up X-Forwarded-Proto https
+		}
+		respond 404
+	}
+}
+
+# 管理入口只监听路由器的 LAN HTTPS 端口，并使用 Caddy 本地 CA。
+# 管理电脑必须信任该 CA；公网 Tunnel 永远不会连接此监听器。
+https://{$KEKEIO_ADMIN_HOST} {
+	tls internal
+
+	@management_root {
+		remote_ip {$KEKEIO_ADMIN_NETWORKS}
+		path /
+	}
+
+	@management {
+		remote_ip {$KEKEIO_ADMIN_NETWORKS}
+		path /admin /admin/* /install /install/* /api/admin/*
+	}
+
+	@public path /api/v1/* /account/verify /account/reset /account/assets/* /health/live /health/ready
+
+	route {
+		redir @management_root /admin 302
+		reverse_proxy @management backend:9009
+		reverse_proxy @public backend:9009
+		respond 404
+	}
+}
