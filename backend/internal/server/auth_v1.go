@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 type MailMessage struct {
@@ -36,13 +37,19 @@ type TokenPair struct {
 }
 
 const (
-	AccessScopeFull          = "full"
-	AccessScopeMigrationRead = "migration_read"
+	AccessScopeFull             = "full"
+	AccessScopeMigrationRead    = "migration_read"
+	minimumPluginPasswordLength = 4
+	maximumPluginPasswordBytes  = 1024
 )
 
+func meetsMinimumPluginPasswordLength(password string) bool {
+	return utf8.RuneCountInString(password) >= minimumPluginPasswordLength
+}
+
 func validatePluginPassword(password string) error {
-	if len(password) < 8 || len(password) > 1024 {
-		return fmt.Errorf("password must contain between 8 and 1024 characters")
+	if !meetsMinimumPluginPasswordLength(password) || len(password) > maximumPluginPasswordBytes {
+		return fmt.Errorf("password must contain at least %d Unicode characters and no more than %d bytes", minimumPluginPasswordLength, maximumPluginPasswordBytes)
 	}
 	weak := map[string]struct{}{
 		"password": {}, "12345678": {}, "qwerty123": {}, "11111111": {},

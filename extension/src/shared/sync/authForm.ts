@@ -5,6 +5,8 @@ export type BackendAuthFormError = {
   message: string;
 };
 
+export const minimumPluginPasswordLength = 4;
+
 export function validateBackendAuthForm(input: {
   mode: BackendAuthMode;
   email: string;
@@ -17,11 +19,10 @@ export function validateBackendAuthForm(input: {
     };
   }
 
-  const minimumLength = input.mode === "register" ? 8 : 4;
-  if (input.password.length < minimumLength) {
+  if (Array.from(input.password).length < minimumPluginPasswordLength) {
     return {
       field: "password",
-      message: input.mode === "register" ? "注册密码至少需要 8 位。" : "登录密码至少需要 4 位。"
+      message: `密码至少需要 ${minimumPluginPasswordLength} 位。`
     };
   }
 

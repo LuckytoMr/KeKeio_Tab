@@ -66,16 +66,20 @@ func TestFixedAdminLoginIsNotSeeded(t *testing.T) {
 	}
 }
 
-func TestCreateUserAllowsFourCharacterPassword(t *testing.T) {
+func TestCreateUserUsesFourUnicodeCharacterMinimum(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t)
 
-	user, err := store.CreateUser(ctx, "short@example.com", "1234")
-	if err != nil {
-		t.Fatalf("create user with four character password: %v", err)
+	if _, err := store.CreateUser(ctx, "too-short@example.com", "密密密"); err == nil {
+		t.Fatal("create user accepted fewer than four Unicode characters")
 	}
-	if !store.CheckPassword(ctx, user.Email, "1234") {
-		t.Fatalf("four character password did not verify")
+
+	user, err := store.CreateUser(ctx, "short@example.com", "密码四位")
+	if err != nil {
+		t.Fatalf("create user with four Unicode character password: %v", err)
+	}
+	if !store.CheckPassword(ctx, user.Email, "密码四位") {
+		t.Fatalf("four Unicode character password did not verify")
 	}
 }
 

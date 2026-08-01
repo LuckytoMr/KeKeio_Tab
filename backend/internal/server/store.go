@@ -380,7 +380,7 @@ func decodeJSONValue[T any](raw string) (T, error) {
 
 func (s *Store) CreateUser(ctx context.Context, email string, password string) (User, error) {
 	email = normalizeEmail(email)
-	if email == "" || len(password) < 4 {
+	if email == "" || !meetsMinimumPluginPasswordLength(password) {
 		return User{}, fmt.Errorf("invalid email or password")
 	}
 

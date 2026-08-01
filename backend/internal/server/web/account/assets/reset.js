@@ -4,6 +4,7 @@ const form = document.querySelector("#reset-form");
 const statusElement = document.querySelector("#account-status");
 const fragment = new URLSearchParams(window.location.hash.slice(1));
 const token = fragment.get("token");
+const minimumPluginPasswordLength = 4;
 window.history.replaceState(null, "", window.location.pathname);
 
 if (!token) {
@@ -11,15 +12,15 @@ if (!token) {
   statusElement.dataset.tone = "error";
 } else {
   form.hidden = false;
-  statusElement.textContent = "请输入至少 8 位的新密码。";
+  statusElement.textContent = `请输入至少 ${minimumPluginPasswordLength} 位的新密码。`;
 }
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const password = form.elements.password.value;
   const confirmation = form.elements.passwordConfirmation.value;
-  if (password.length < 8) {
-    statusElement.textContent = "新密码至少需要 8 位。";
+  if (Array.from(password).length < minimumPluginPasswordLength) {
+    statusElement.textContent = `新密码至少需要 ${minimumPluginPasswordLength} 位。`;
     statusElement.dataset.tone = "error";
     return;
   }

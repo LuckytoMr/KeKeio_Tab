@@ -98,10 +98,48 @@ func getV1Bearer(t *testing.T, handler http.Handler, path, token string) *httpte
 	return response
 }
 
+func TestPluginPasswordMinimumIsFourUnicodeCharacters(t *testing.T) {
+	if minimumPluginPasswordLength != 4 {
+		t.Fatalf("minimumPluginPasswordLength = %d, want 4", minimumPluginPasswordLength)
+	}
+	for _, testCase := range []struct {
+		name     string
+		password string
+		valid    bool
+	}{
+		{name: "four ASCII", password: "2231", valid: true},
+		{name: "three ASCII", password: "223", valid: false},
+		{name: "four Unicode code points", password: "密码四位", valid: true},
+		{name: "three emoji", password: "🔐🔐🔐", valid: false},
+		{name: "four emoji", password: "🔐🔐🔐🔐", valid: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			err := validatePluginPassword(testCase.password)
+			if testCase.valid && err != nil {
+				t.Fatalf("validatePluginPassword(%q) = %v, want valid", testCase.password, err)
+			}
+			if !testCase.valid && err == nil {
+				t.Fatalf("validatePluginPassword(%q) accepted a password shorter than four Unicode characters", testCase.password)
+			}
+		})
+	}
+}
+
+func TestV1RegistrationRejectsFewerThanFourUnicodeCharacters(t *testing.T) {
+	handler, _, mailer := newV1AuthApp(t)
+	response := postV1(t, handler, "/api/v1/auth/register", `{"email":"short@example.com","password":"🔐🔐🔐"}`)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "INVALID_REGISTRATION") {
+		t.Fatalf("short Unicode password registration = %d %s", response.Code, response.Body.String())
+	}
+	if token := mailer.token("verify_email"); token != "" {
+		t.Fatalf("short password registration sent a verification token: %q", token)
+	}
+}
+
 func TestV1RegistrationVerificationLoginAndRefreshReplay(t *testing.T) {
 	handler, store, mailer := newV1AuthApp(t)
 
-	register := postV1(t, handler, "/api/v1/auth/register", `{"email":"User@Example.com","password":"safe-password-123"}`)
+	register := postV1(t, handler, "/api/v1/auth/register", `{"email":"User@Example.com","password":"2231"}`)
 	if register.Code != http.StatusCreated || !strings.Contains(register.Body.String(), `"status":"pending_verification"`) {
 		t.Fatalf("register = %d %s", register.Code, register.Body.String())
 	}
@@ -113,7 +151,7 @@ func TestV1RegistrationVerificationLoginAndRefreshReplay(t *testing.T) {
 		t.Fatalf("registration did not send verification token")
 	}
 
-	blocked := postV1(t, handler, "/api/v1/auth/login", `{"email":"user@example.com","password":"safe-password-123","deviceId":"dev_a"}`)
+	blocked := postV1(t, handler, "/api/v1/auth/login", `{"email":"user@example.com","password":"2231","deviceId":"dev_a"}`)
 	if blocked.Code != http.StatusForbidden || !strings.Contains(blocked.Body.String(), "EMAIL_NOT_VERIFIED") {
 		t.Fatalf("unverified login = %d %s", blocked.Code, blocked.Body.String())
 	}
@@ -123,7 +161,7 @@ func TestV1RegistrationVerificationLoginAndRefreshReplay(t *testing.T) {
 		t.Fatalf("verify email = %d %s", verified.Code, verified.Body.String())
 	}
 
-	login := postV1(t, handler, "/api/v1/auth/login", `{"email":"user@example.com","password":"safe-password-123","deviceId":"dev_a"}`)
+	login := postV1(t, handler, "/api/v1/auth/login", `{"email":"user@example.com","password":"2231","deviceId":"dev_a"}`)
 	if login.Code != http.StatusOK {
 		t.Fatalf("login = %d %s", login.Code, login.Body.String())
 	}
@@ -410,7 +448,7 @@ func TestV1PasswordResetIsSingleUseAndRevokesSessions(t *testing.T) {
 	if newerResetToken == "" || newerResetToken == resetToken {
 		t.Fatalf("second reset token did not rotate: old=%q new=%q", resetToken, newerResetToken)
 	}
-	reset := postV1(t, handler, "/api/v1/auth/reset-password", `{"token":"`+newerResetToken+`","password":"new-password-456"}`)
+	reset := postV1(t, handler, "/api/v1/auth/reset-password", `{"token":"`+newerResetToken+`","password":"4422"}`)
 	if reset.Code != http.StatusOK {
 		t.Fatalf("reset password = %d %s", reset.Code, reset.Body.String())
 	}
@@ -435,7 +473,7 @@ func TestV1PasswordResetIsSingleUseAndRevokesSessions(t *testing.T) {
 	if oldLogin.Code != http.StatusUnauthorized {
 		t.Fatalf("old password survived reset: %d %s", oldLogin.Code, oldLogin.Body.String())
 	}
-	newLogin := postV1(t, handler, "/api/v1/auth/login", `{"email":"reset@example.com","password":"new-password-456","deviceId":"dev_reset"}`)
+	newLogin := postV1(t, handler, "/api/v1/auth/login", `{"email":"reset@example.com","password":"4422","deviceId":"dev_reset"}`)
 	if newLogin.Code != http.StatusOK {
 		t.Fatalf("new password login = %d %s", newLogin.Code, newLogin.Body.String())
 	}

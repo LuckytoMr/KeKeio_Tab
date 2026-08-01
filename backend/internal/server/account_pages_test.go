@@ -96,3 +96,26 @@ func TestAccountMailContentUsesFragmentLinkWithoutBareToken(t *testing.T) {
 		}
 	}
 }
+
+func TestPasswordResetPageUsesFourCharacterMinimum(t *testing.T) {
+	store := newTestStore(t)
+	handler := NewApp(store, Config{}).Routes()
+
+	page := httptest.NewRecorder()
+	handler.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/account/reset", nil))
+	if page.Code != http.StatusOK || strings.Count(page.Body.String(), `minlength="4"`) != 2 || strings.Contains(page.Body.String(), `minlength="8"`) {
+		t.Fatalf("reset page does not fix the minimum password length at four: status=%d body=%s", page.Code, page.Body.String())
+	}
+
+	script := httptest.NewRecorder()
+	handler.ServeHTTP(script, httptest.NewRequest(http.MethodGet, "/account/assets/reset.js", nil))
+	body := script.Body.String()
+	for _, required := range []string{"minimumPluginPasswordLength = 4", "Array.from(password).length"} {
+		if script.Code != http.StatusOK || !strings.Contains(body, required) {
+			t.Fatalf("reset script missing %q: status=%d body=%s", required, script.Code, body)
+		}
+	}
+	if strings.Contains(body, "至少 8 位") || strings.Contains(body, "password.length < 8") {
+		t.Fatalf("reset script restored the old eight-character rule: %s", body)
+	}
+}

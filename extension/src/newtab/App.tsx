@@ -62,7 +62,7 @@ import {
   normalizeBackendWallpaperCatalog
 } from "../shared/sync/backendClient";
 import { fixedBackendUrl } from "../shared/sync/backendEndpoint";
-import { validateBackendAuthForm, type BackendAuthFormError } from "../shared/sync/authForm";
+import { minimumPluginPasswordLength, validateBackendAuthForm, type BackendAuthFormError } from "../shared/sync/authForm";
 import {
   GistConflictError,
   githubProfileFilename,
@@ -3223,7 +3223,7 @@ export function App() {
                           value={backendPassword}
                           type="password"
                           autoComplete="current-password"
-                          minLength={4}
+                          minLength={minimumPluginPasswordLength}
                           aria-invalid={syncFormError?.field === "password" || undefined}
                           aria-describedby={syncFormError?.field === "password" ? "sync-password-help sync-password-error" : "sync-password-help"}
                           onInput={(event) => {
@@ -3231,7 +3231,7 @@ export function App() {
                             setSyncFormError((current) => current?.field === "password" ? null : current);
                             setSyncAuthError("");
                           }}
-                          placeholder="登录至少 4 位"
+                          placeholder={`密码至少 ${minimumPluginPasswordLength} 位`}
                           disabled={syncBusy}
                         />
                         {syncFormError?.field === "password" ? (
@@ -3246,7 +3246,7 @@ export function App() {
                       </div>
                     )}
                     {!backendAuth ? (
-                      <p className="sync-password-help" id="sync-password-help">登录密码至少 4 位；新注册密码至少 8 位。</p>
+                      <p className="sync-password-help" id="sync-password-help">登录和注册密码至少 {minimumPluginPasswordLength} 位。</p>
                     ) : null}
                     {syncAuthError ? <p className="sync-form-feedback" role="alert">{syncAuthError}</p> : null}
                   </div>

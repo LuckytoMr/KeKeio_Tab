@@ -46,10 +46,33 @@ func TestEnsureDevelopmentInstallationCreatesReadyLocalAccounts(t *testing.T) {
 func TestEnsureDevelopmentInstallationRejectsWeakPasswordWithoutLocalDevOptIn(t *testing.T) {
 	store := newTestStore(t)
 	err := store.EnsureDevelopmentInstallation(t.Context(), DevelopmentAccounts{
-		AdminEmail: "admin@local.test", PluginEmail: "user@local.test", Password: "2231",
+		AdminEmail: "admin@local.test", PluginEmail: "user@local.test", Password: "password",
 	})
 	if err == nil {
 		t.Fatal("weak password was accepted without the local development opt-in")
+	}
+}
+
+func TestEnsureDevelopmentInstallationAllowsFourCharacterPassword(t *testing.T) {
+	store := newTestStore(t)
+	err := store.EnsureDevelopmentInstallation(t.Context(), DevelopmentAccounts{
+		AdminEmail: "admin@local.test", PluginEmail: "user@local.test", Password: "2231",
+	})
+	if err != nil {
+		t.Fatalf("four-character development password was rejected: %v", err)
+	}
+}
+
+func TestEnsureDevelopmentInstallationUsesFourUnicodeCharacterMinimum(t *testing.T) {
+	store := newTestStore(t)
+	err := store.EnsureDevelopmentInstallation(t.Context(), DevelopmentAccounts{
+		AdminEmail:        "admin@local.test",
+		PluginEmail:       "user@local.test",
+		Password:          "🔐🔐🔐",
+		AllowWeakPassword: true,
+	})
+	if err == nil {
+		t.Fatal("development initialization accepted fewer than four Unicode characters")
 	}
 }
 

@@ -59,6 +59,11 @@ $adminSources = if (Test-Path -LiteralPath $adminSourceRoot) {
 }
 $adminText = Read-WorkspaceText -Paths $adminSources
 
+$extensionAuthFormText = Get-Content -LiteralPath (Join-Path $root "extension\src\shared\sync\authForm.ts") -Raw
+$extensionAppText = Get-Content -LiteralPath (Join-Path $root "extension\src\newtab\App.tsx") -Raw
+$accountResetScriptText = Get-Content -LiteralPath (Join-Path $root "backend\internal\server\web\account\assets\reset.js") -Raw
+$accountResetPageText = Get-Content -LiteralPath (Join-Path $root "backend\internal\server\web\account\reset.html") -Raw
+
 $manifestPath = Join-Path $root "extension\public\manifest.json"
 $manifestText = Get-Content -LiteralPath $manifestPath -Raw
 $manifest = $manifestText | ConvertFrom-Json
@@ -92,8 +97,21 @@ Assert-Present -Name "管理员密码最低字符数必须固定为 4" -Text $ba
 Assert-Present -Name "后端管理员密码必须按 Unicode 字符计数" -Text $backendText -Pattern 'utf8\.RuneCountInString\(input\.Password\)'
 Assert-Present -Name "管理端管理员密码最低字符数必须固定为 4" -Text $adminText -Pattern 'minimumAdminPasswordLength\s*=\s*4'
 Assert-Present -Name "管理端管理员密码必须按 Unicode 字符计数" -Text $adminText -Pattern 'Array\.from\(draft\.password\)\.length'
+Assert-Present -Name "插件用户密码最低字符数必须固定为 4" -Text $backendText -Pattern 'minimumPluginPasswordLength\s*=\s*4'
+Assert-Present -Name "后端插件用户密码必须按 Unicode 字符计数" -Text $backendText -Pattern 'return\s+utf8\.RuneCountInString\(password\)\s*>=\s*minimumPluginPasswordLength'
+Assert-Present -Name "后端插件密码校验必须复用统一最低长度逻辑" -Text $backendText -Pattern '!meetsMinimumPluginPasswordLength\(password\)'
+Assert-Present -Name "遗留插件用户创建必须复用统一最低长度逻辑" -Text $backendText -Pattern 'email\s*==\s*""\s*\|\|\s*!meetsMinimumPluginPasswordLength\(password\)'
+Assert-Present -Name "开发初始化必须复用统一最低长度逻辑" -Text $backendText -Pattern '!meetsMinimumPluginPasswordLength\(accounts\.Password\)'
+Assert-Present -Name "扩展插件用户密码最低字符数必须固定为 4" -Text $extensionAuthFormText -Pattern 'minimumPluginPasswordLength\s*=\s*4'
+Assert-Present -Name "扩展插件用户密码必须按 Unicode 字符计数" -Text $extensionAuthFormText -Pattern 'Array\.from\(input\.password\)\.length'
+Assert-Absent -Name "扩展不得恢复注册密码 8 位规则" -Text ($extensionAuthFormText + "`n" + $extensionAppText) -Pattern '注册密码[^\r\n]{0,30}8 位|mode\s*===\s*"register"\s*\?\s*8'
+Assert-Present -Name "邮件重置密码最低字符数必须固定为 4" -Text ($accountResetScriptText + "`n" + $accountResetPageText) -Pattern 'minimumPluginPasswordLength\s*=\s*4'
+Assert-Present -Name "邮件重置密码必须按 Unicode 字符计数" -Text $accountResetScriptText -Pattern 'Array\.from\(password\)\.length'
+Assert-Present -Name "邮件重置表单最低长度必须固定为 4" -Text $accountResetPageText -Pattern 'minlength="4"'
+Assert-Absent -Name "邮件重置页面不得恢复 8 位规则" -Text ($accountResetScriptText + "`n" + $accountResetPageText) -Pattern '至少\s*8\s*位|minlength="8"|password\.length\s*<\s*8'
 Assert-Present -Name "项目规则必须锁定无安装码安装" -Text $productPolicyText -Pattern '首次安装和管理员重置不使用一次性安装码'
 Assert-Present -Name "项目规则必须锁定管理员密码 4 个 Unicode 字符" -Text $productPolicyText -Pattern '最低长度固定为 \*\*4 个 Unicode 字符\*\*'
+Assert-Present -Name "项目规则必须锁定插件用户密码 4 个 Unicode 字符" -Text $productPolicyText -Pattern '普通插件用户的注册密码与重置密码最低长度同样固定为 \*\*4 个 Unicode 字符\*\*'
 Assert-Present -Name "后端必须发送 CSP" -Text $backendText -Pattern 'Content-Security-Policy'
 Assert-Present -Name "后端必须发送 nosniff" -Text $backendText -Pattern 'X-Content-Type-Options'
 Assert-Present -Name "同步写入必须执行版本前置条件" -Text $backendText -Pattern 'BaseVersion|baseVersion'
@@ -139,6 +157,9 @@ Assert-Absent -Name "bind mount 初始化不得递归改写宿主目录" -Text $
 Assert-Present -Name "生产入口必须读取 LAN HTTP 显式开关" -Text $serverCommandText -Pattern 'envBool\("FULLPRO_ALLOW_INSECURE_ADMIN_HTTP",\s*false\)'
 Assert-Present -Name "生产入口必须把 LAN HTTP 显式开关传入服务配置" -Text $serverCommandText -Pattern 'AllowInsecureAdminHTTP:\s+allowInsecureAdminHTTP'
 Assert-Absent -Name "CI 不得重新消耗 Actions Artifact 配额" -Text $publishWorkflowText -Pattern 'actions/upload-artifact'
+Assert-Present -Name "CI 必须由 main 推送自动触发" -Text $publishWorkflowText -Pattern '(?ms)^on:\s*\r?\n\s+push:\s*\r?\n\s+branches:\s*\[main\]'
+Assert-Present -Name "main 自动发布必须等待完整验证" -Text $publishWorkflowText -Pattern '(?ms)^\s*package:\s*\r?\n[\s\S]*?\s+needs:\s*verify\s*$'
+Assert-Present -Name "main 推送必须直接进入发布任务" -Text $publishWorkflowText -Pattern "github\.event_name\s*==\s*'push'[\s\S]{0,160}github\.ref\s*==\s*'refs/heads/main'"
 Assert-Present -Name "main 构建必须覆盖滚动 Release" -Text $publishWorkflowText -Pattern 'release_tag="main-latest"'
 Assert-Present -Name "CI 必须在 Actions 摘要提供下载链接" -Text $publishWorkflowText -Pattern 'GITHUB_STEP_SUMMARY'
 Assert-Present -Name "CI 必须关闭 Docker 构建记录上传" -Text $publishWorkflowText -Pattern "DOCKER_BUILD_RECORD_UPLOAD:\s*'false'"

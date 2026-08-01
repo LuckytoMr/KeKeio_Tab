@@ -8,7 +8,8 @@
 - 首次安装和管理员重置不使用一次性安装码，不生成 `install-code` 文件，不读取 `FULLPRO_INSTALL_CODE*`，前端不得显示安装码输入步骤。
 - 安装向导应在确认服务处于 `uninitialized` 或 `requires_admin_reset` 后自动建立安装会话。
 - 无安装码不等于无会话保护：安装会话的 HttpOnly/SameSite Cookie、CSRF、来源校验、过期时间、并发提交保护和管理网段限制必须保留。
-- 管理员密码最低长度固定为 **4 个 Unicode 字符**，精确定义为 4 个 Unicode code point；不得 trim 或 normalize 密码。Go 使用 `utf8.RuneCountInString`，前端使用 `Array.from(password).length`。前后端必须一致，不得擅自提高到 8、12 或其他长度。普通插件用户密码和完整备份恢复口令策略不受这一约束影响。
+- 管理员密码最低长度固定为 **4 个 Unicode 字符**，精确定义为 4 个 Unicode code point；不得 trim 或 normalize 密码。Go 使用 `utf8.RuneCountInString`，前端使用 `Array.from(password).length`。前后端必须一致，不得擅自提高到 8、12 或其他长度。完整备份恢复口令策略不受这一约束影响。
+- 普通插件用户的注册密码与重置密码最低长度同样固定为 **4 个 Unicode 字符**；扩展登录与注册表单、邮件重置页面和后端 `validatePluginPassword` 必须保持一致，不得重新区分为“登录 4 位、注册 8 位”。
 
 ## 路由器部署
 
@@ -19,6 +20,7 @@
 
 ## GitHub 发布
 
+- 每次推送到 `main` 都必须在验证通过后自动构建并覆盖 `main-latest` Release；不得要求额外创建标签、手动运行工作流或使用 Actions Artifact 才能取得安装文件。
 - Actions 只上传两个自定义 Release 资产：`kekeio-tab-extension.zip` 和 `kekeio-tab-docker-arm64.tar`。
 - Docker tar 必须同时包含 ARM64 的 `kekeio-tab:arm64` 与构建时最新的 `cloudflare/cloudflared:latest`。
 - 不得恢复 Actions Artifact、GHCR 发布、后端 ZIP、SimpleDocker 外层 ZIP、完整路由器归档或外层 `.sha256` 附件。

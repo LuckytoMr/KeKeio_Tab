@@ -1,15 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { validateBackendAuthForm } from "./authForm";
+import { minimumPluginPasswordLength, validateBackendAuthForm } from "./authForm";
 
 describe("validateBackendAuthForm", () => {
-  it("allows the four-character local development password for login", () => {
+  it("fixes the plugin password minimum at four Unicode characters", () => {
+    expect(minimumPluginPasswordLength).toBe(4);
     expect(validateBackendAuthForm({ mode: "login", email: "user@local.test", password: "2231" })).toBeNull();
+    expect(validateBackendAuthForm({ mode: "register", email: "user@local.test", password: "2231" })).toBeNull();
+    expect(validateBackendAuthForm({ mode: "register", email: "user@local.test", password: "密码四位" })).toBeNull();
   });
 
-  it("keeps registration aligned with the server's eight-character requirement", () => {
-    expect(validateBackendAuthForm({ mode: "register", email: "user@local.test", password: "2231" })).toEqual({
+  it("rejects login and registration passwords shorter than four Unicode characters", () => {
+    expect(validateBackendAuthForm({ mode: "login", email: "user@local.test", password: "223" })).toEqual({
       field: "password",
-      message: "注册密码至少需要 8 位。"
+      message: "密码至少需要 4 位。"
+    });
+    expect(validateBackendAuthForm({ mode: "register", email: "user@local.test", password: "🔐🔐🔐" })).toEqual({
+      field: "password",
+      message: "密码至少需要 4 位。"
     });
   });
 

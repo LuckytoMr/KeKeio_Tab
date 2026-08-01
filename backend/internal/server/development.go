@@ -20,7 +20,7 @@ type DevelopmentAccounts struct {
 func (s *Store) EnsureDevelopmentInstallation(ctx context.Context, accounts DevelopmentAccounts) error {
 	accounts.AdminEmail = normalizeEmail(accounts.AdminEmail)
 	accounts.PluginEmail = normalizeEmail(accounts.PluginEmail)
-	if !validEmail(accounts.AdminEmail) || !validEmail(accounts.PluginEmail) || accounts.AdminEmail == accounts.PluginEmail || len(accounts.Password) < 4 {
+	if !validEmail(accounts.AdminEmail) || !validEmail(accounts.PluginEmail) || accounts.AdminEmail == accounts.PluginEmail || !meetsMinimumPluginPasswordLength(accounts.Password) {
 		return fmt.Errorf("invalid local development accounts")
 	}
 	if err := validatePluginPassword(accounts.Password); err != nil && !accounts.AllowWeakPassword {
