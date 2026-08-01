@@ -18,13 +18,15 @@ SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 IMAGE_ARCHIVE="${KEKEIO_IMAGE_ARCHIVE:-${SCRIPT_DIR}/images.tar}"
 IMAGE_CHECKSUM="${IMAGE_ARCHIVE}.sha256"
 RUNTIME_DIR="${KEKEIO_RUNTIME_DIR:-${SCRIPT_DIR}/runtime}"
-DATA_DIR="${RUNTIME_DIR}/data"
-BACKUP_DIR="${RUNTIME_DIR}/backups"
 SECRETS_DIR="${RUNTIME_DIR}/secrets"
 TOKEN_FILE="${SECRETS_DIR}/cloudflare-tunnel-token"
 STATE_FILE="${RUNTIME_DIR}/install.env"
 SETTINGS_FILE="${RUNTIME_DIR}/cloudflare-settings.txt"
 CADDYFILE="${SCRIPT_DIR}/Caddyfile.tunnel"
+DATA_VOLUME="${KEKEIO_DATA_VOLUME:-kekeio-tab-data}"
+BACKUP_VOLUME="${KEKEIO_BACKUP_VOLUME:-kekeio-tab-backups}"
+TOKEN_VOLUME="${KEKEIO_TOKEN_VOLUME:-kekeio-tab-cloudflared-token}"
+CADDYFILE_VOLUME="${KEKEIO_CADDYFILE_VOLUME:-kekeio-tab-caddyfile}"
 REPLACE_UNMANAGED=0
 DEPLOYMENT_COMPLETE=0
 CREATED_CONTAINERS=""
@@ -135,10 +137,9 @@ detect_lan_cidr() {
     return
   fi
 
-  [ -r /dev/tty ] || die "无法自动识别 LAN 地址，请以 KEKEIO_LAN_CIDR=路由器IP/前缀 重新运行"
-  printf '%s' '请输入路由器 LAN 地址/前缀（例如 192.168.31.1/24）：' >/dev/tty
-  IFS= read -r candidate </dev/tty
-  is_ipv4_cidr "$candidate" || die "LAN 地址格式无效：$candidate"
+  candidate="${KEKEIO_DEFAULT_LAN_CIDR:-192.168.50.1/24}"
+  is_ipv4_cidr "$candidate" || die "默认 LAN 地址格式无效：$candidate"
+  printf '%s\n' "[KeKeIO] 未检测到宿主 LAN，使用固定默认值 $candidate" >&2
   printf '%s\n' "$candidate"
 }
 
@@ -182,6 +183,35 @@ write_token_if_missing() {
 
   chown 65532:65532 "$TOKEN_FILE" || die "无法设置 Tunnel Token 文件属主"
   chmod 400 "$TOKEN_FILE" || die "无法保护 Tunnel Token 文件"
+}
+
+prepare_managed_volumes() {
+  docker volume create "$DATA_VOLUME" >/dev/null
+  docker volume create "$BACKUP_VOLUME" >/dev/null
+  docker volume create "$TOKEN_VOLUME" >/dev/null
+  docker volume create "$CADDYFILE_VOLUME" >/dev/null
+
+  docker run --rm --user 0 --entrypoint sh \
+    -v "${DATA_VOLUME}:/data" \
+    -v "${BACKUP_VOLUME}:/backups" \
+    "$APP_IMAGE" \
+    -c 'chown -R 10001:10001 /data /backups && chmod 700 /data /backups' >/dev/null
+
+  docker run --rm -i --user 0 --entrypoint sh \
+    --tmpfs /data:rw,noexec,nosuid,size=1m \
+    --tmpfs /backups:rw,noexec,nosuid,size=1m \
+    -v "${TOKEN_VOLUME}:/run/secrets" \
+    "$APP_IMAGE" \
+    -c 'umask 077; cat > /run/secrets/cloudflare-tunnel-token; chown 65532:65532 /run/secrets/cloudflare-tunnel-token; chmod 400 /run/secrets/cloudflare-tunnel-token' \
+    <"$TOKEN_FILE" >/dev/null
+
+  docker run --rm -i --user 0 --entrypoint sh \
+    --tmpfs /data:rw,noexec,nosuid,size=1m \
+    --tmpfs /config:rw,noexec,nosuid,size=1m \
+    -v "${CADDYFILE_VOLUME}:/etc/caddy" \
+    "$CADDY_IMAGE" \
+    -c 'cat > /etc/caddy/Caddyfile; chown 0:0 /etc/caddy/Caddyfile; chmod 444 /etc/caddy/Caddyfile' \
+    <"$CADDYFILE" >/dev/null
 }
 
 verify_image() {
@@ -285,7 +315,7 @@ usage() {
   sh install.sh --self-test 仅运行脚本自检
 
 可选环境变量：
-  KEKEIO_LAN_CIDR=192.168.31.1/24
+  KEKEIO_LAN_CIDR=192.168.50.1/24
   KEKEIO_RUNTIME_DIR=/mnt/usb-xxxx/mi_docker/tab
 EOF
 }
@@ -314,9 +344,8 @@ esac
 [ -r "$CADDYFILE" ] || die "找不到 Caddy 配置：$CADDYFILE"
 docker info >/dev/null 2>&1 || die "Docker 未运行或当前终端没有 Docker 权限"
 
-mkdir -p "$DATA_DIR" "$BACKUP_DIR" "$SECRETS_DIR"
-chown -R 10001:10001 "$DATA_DIR" "$BACKUP_DIR"
-chmod 700 "$DATA_DIR" "$BACKUP_DIR" "$SECRETS_DIR"
+mkdir -p "$SECRETS_DIR"
+chmod 700 "$RUNTIME_DIR" "$SECRETS_DIR"
 
 if [ -r "$IMAGE_CHECKSUM" ]; then
   log "校验离线镜像"
@@ -338,6 +367,7 @@ is_ipv4 "$BRIDGE_GATEWAY" || die "无法读取 Docker 默认 bridge 网关"
 ORIGIN_HOST=$(generate_origin_host)
 
 write_token_if_missing
+prepare_managed_volumes
 ensure_network
 docker volume create kekeio-tab-caddy-data >/dev/null
 docker volume create kekeio-tab-caddy-config >/dev/null
@@ -387,8 +417,8 @@ docker run -d \
   -e FULLPRO_HEALTHCHECK_URL=http://127.0.0.1:9009/health/live \
   -e "FULLPRO_ADMIN_ALLOWED_CIDRS=127.0.0.1/32,::1/128,${LAN_NETWORK}" \
   -e "FULLPRO_TRUSTED_PROXIES=${CADDY_IP}/32" \
-  -v "${DATA_DIR}:/data" \
-  -v "${BACKUP_DIR}:/backups" \
+  -v "${DATA_VOLUME}:/data" \
+  -v "${BACKUP_VOLUME}:/backups" \
   "$APP_IMAGE" >/dev/null
 CREATED_CONTAINERS="kekeio-tab-backend $CREATED_CONTAINERS"
 wait_for_healthy kekeio-tab-backend
@@ -422,7 +452,7 @@ docker run -d \
   -e "KEKEIO_ADMIN_HOST=${LAN_IP}" \
   -e "KEKEIO_ADMIN_NETWORKS=${LAN_NETWORK}" \
   -e "KEKEIO_TUNNEL_ORIGIN_HOST=${ORIGIN_HOST}" \
-  -v "${CADDYFILE}:/etc/caddy/Caddyfile:ro" \
+  -v "${CADDYFILE_VOLUME}:/etc/caddy:ro" \
   -v kekeio-tab-caddy-data:/data \
   -v kekeio-tab-caddy-config:/config \
   "$CADDY_IMAGE" >/dev/null
@@ -444,7 +474,7 @@ docker run -d \
   --log-driver json-file \
   --log-opt max-size=10m \
   --log-opt max-file=3 \
-  -v "${TOKEN_FILE}:/run/secrets/cloudflare-tunnel-token:ro" \
+  -v "${TOKEN_VOLUME}:/run/secrets:ro" \
   "$CLOUDFLARED_IMAGE" \
   tunnel --no-autoupdate --metrics 0.0.0.0:20241 run \
   --token-file /run/secrets/cloudflare-tunnel-token >/dev/null

@@ -13,36 +13,37 @@ KeKeIO Tab 是一个本地优先的新标签页扩展，配套单机自托管同
 
 ## Docker 正式部署
 
-后端只支持 Docker 正式部署。小米/SimpleDocker 的默认入口是一键 ARM64 包，不要求手工准备 Compose、Caddyfile、网段或镜像：
+后端只支持 Docker 正式部署。当前固定设备（LAN `192.168.50.1/24`）推荐下载 `kekeio-tab-simpledocker-arm64.zip`，解压后只需配置一次本地 `cloudflared.env`，再按包内 `docker命令.txt` 直接运行：
+
+```sh
+docker load -i kekeio-tab-docker-arm64.tar
+# 然后执行 docker命令.txt 中的两个 docker run
+```
+
+应用数据和备份使用 Docker 命名卷，不依赖 SimpleDocker 容器终端中的 `/data` 与宿主机路径一致。Token 只写入路由器本地 `cloudflared.env` 一次，容器重启或按相同命令重建时直接复用。Cloudflare Published application 固定填写 `http://localhost:9009`，不再填写 LAN CIDR、bridge 网关或 HTTP Host Header。
+
+直接模式链路：
+
+```text
+https://tab.kekeio.com -> Cloudflare Tunnel -> cloudflared -> localhost:9009
+局域网管理员 -> http://192.168.50.1:9009
+```
+
+`cloudflared` 与后端共享网络命名空间时，后端只信任 loopback 代理并依据 Cloudflare 的 `X-Forwarded-For` 判断真实客户端；公网 `/install`、`/admin` 和管理 API 返回 `404`。LAN 管理 HTTP 是该固定路由器直启模式的显式折中，不得对 WAN 转发 `9009`。
+
+需要 LAN HTTPS、Caddy 公网路径白名单和 Token 文件挂载时，仍可使用完整隔离包：
 
 ```sh
 tar -xzf kekeio-tab-router-arm64.tar.gz && sh kekeio-tab-router-arm64/install.sh
 ```
 
-安装器会加载 GitHub Actions 已构建的应用、Caddy 和 cloudflared 镜像，自动识别 LAN 与 Docker bridge、创建持久目录和安全网络并启动容器。首次运行只会无回显地询问新的 Cloudflare Tunnel Token；完成后会打印 Cloudflare Published application 需要填写的 Service URL 与 HTTP Host Header。高级手工部署仍可查阅：
+详细说明：
 
 - [路由器 Docker 部署指南](backend/deploy/router/README.md)
 - [Compose 配置](backend/deploy/router/compose.yaml)
 - [Caddy 路由策略](backend/deploy/router/Caddyfile)
 
-默认网络链路：
-
-```text
-https://tab.kekeio.com
-  -> Cloudflare Tunnel
-  -> cloudflared
-  -> Caddy 公网白名单
-  -> backend:9009
-
-局域网管理电脑
-  -> https://路由器LAN地址:8443
-  -> Caddy LAN 管理入口
-  -> backend:9009
-```
-
-Tunnel 只建立出站连接，不需要路由器开放或转发任何 WAN 端口。公网只允许插件 API、账号页面和健康端点；安装、后台和管理 API 仅能从局域网 `8443` 进入。后端 `9009` 永远不发布到宿主机或 WAN。
-
-下面仅是高级手工/直连配置入口，不是小米路由器默认部署方式：
+Tunnel 只建立出站连接，不需要路由器开放或转发任何 WAN 端口。下面是高级 Compose 入口：
 
 ```sh
 cd backend/deploy/router
@@ -62,7 +63,7 @@ docker compose --env-file .env -f compose.yaml up -d
 ghcr.io/<GitHub用户名>/kekeio-tab:sha-<完整提交SHA>
 ```
 
-普通 `main` 推送或未选择 `v*` 标签的 `workflow_dispatch` 只做验证和镜像发布，不创建 Actions Artifact。推送 `v*` 标签时，GitHub Actions 会在云端构建发布包，并在同一个 Job 中直接上传到 GitHub Release：`kekeio-tab-backend.zip`、`kekeio-tab-extension.zip`、兼容用的 `kekeio-tab-docker-arm64.tar`、一键路由器包 `kekeio-tab-router-arm64.tar.gz` 及各自的 `.sha256` 校验文件。路由器包内含完整 ARM64 镜像、安装器和 Caddy 公网白名单配置；重跑同一个标签会安全覆盖同名 Release 资源。
+普通 `main` 推送或未选择 `v*` 标签的 `workflow_dispatch` 只做验证和镜像发布，不创建 Actions Artifact。推送 `v*` 标签时，GitHub Actions 会在云端构建发布包，并在同一个 Job 中直接上传到 GitHub Release：`kekeio-tab-backend.zip`、`kekeio-tab-extension.zip`、应用镜像 `kekeio-tab-docker-arm64.tar`、直接运行包 `kekeio-tab-simpledocker-arm64.zip`、完整隔离包 `kekeio-tab-router-arm64.tar.gz` 及各自的 `.sha256` 校验文件。重跑同一个标签会安全覆盖同名 Release 资源。
 
 ```sh
 git tag v0.1.0
@@ -77,7 +78,7 @@ git push origin v0.1.0
 tar -xzf kekeio-tab-router-arm64.tar.gz && sh kekeio-tab-router-arm64/install.sh
 ```
 
-需要额外校验下载文件时，再同时下载同名 `.sha256` 并先运行 `sha256sum -c kekeio-tab-router-arm64.tar.gz.sha256`；安装器无论如何都会校验包内的 `images.tar`。安装器不依赖 `docker compose`，会直接使用 Docker CLI 加载包内的 `kekeio-tab:arm64`、`caddy:2.11.4-alpine` 和固定版本 cloudflared，然后创建与原 Compose 等价的隔离拓扑。Token 只保存到本地只读文件，不进入命令、环境变量、镜像或 GitHub。`kekeio-tab-docker-arm64.tar` 仍是仅含应用镜像的兼容包，不能替代一键路由器包。
+需要额外校验下载文件时，再同时下载同名 `.sha256` 并先运行 `sha256sum -c kekeio-tab-router-arm64.tar.gz.sha256`；安装器无论如何都会校验包内的 `images.tar`。安装器改用 Docker 命名卷保存 SQLite、备份、Caddyfile 与 Tunnel Token，避免从 SimpleDocker 容器终端调用 Docker 时发生宿主 bind mount 路径错位。
 
 私有 GHCR 镜像部署前，使用拥有 `read:packages` 权限的 GitHub Personal Access Token 登录：
 

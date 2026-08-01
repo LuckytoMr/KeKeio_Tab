@@ -1,6 +1,33 @@
 # 小米万兆路由器 Docker 与 Cloudflare Tunnel 部署
 
-本目录是 KeKeIO Tab 后端的正式路由器部署入口。针对小米万兆路由器、SimpleDocker、`linux/arm64` 和 Cloudflare Tunnel，推荐拓扑如下：
+本目录是 KeKeIO Tab 后端的正式路由器部署入口。针对当前固定为 `192.168.50.1/24` 的小米万兆路由器，提供“两个容器直接运行”和“Caddy 完整隔离”两种受支持路径。
+
+## 最简：Docker 直接运行
+
+GitHub Release 的 `kekeio-tab-simpledocker-arm64.zip` 包含：
+
+```text
+kekeio-tab-docker-arm64.tar
+docker命令.txt
+cloudflared.env.example
+```
+
+操作顺序：
+
+1. 把 `cloudflared.env.example` 复制为 `cloudflared.env`，只在等号后填写一次 Tunnel Token，并执行 `chmod 600 cloudflared.env`。
+2. 执行 `docker load -i kekeio-tab-docker-arm64.tar`。
+3. 原样执行 `docker命令.txt` 中的两个 `docker run`。
+4. Cloudflare Published application 填 `HTTP`、`http://localhost:9009`，HTTP Host Header 留空。
+
+该模式把应用数据和备份放入 `kekeio-tab-data`、`kekeio-tab-backups` 命名卷，不依赖 SimpleDocker 容器终端的路径与宿主机路径相同。LAN 安装入口为 `http://192.168.50.1:9009/install`；`9009` 只绑定这个 LAN 地址，严禁 WAN 转发。
+
+`cloudflared` 通过 `--network container:kekeio-tab` 访问 loopback。这个用法只有在命令同时保留 `FULLPRO_TRUSTED_PROXIES=127.0.0.1/32`、精确管理 CIDR 和 LAN HTTP 显式开关时才受支持：Cloudflare 提供的 `X-Forwarded-For` 会用于恢复真实公网客户端 IP，公网管理路径因此返回 `404`，而不是被误认为 loopback 管理员。
+
+Token 保存在路由器本地 `cloudflared.env`，以后 `docker restart` 或按同一命令重建都不再交互输入。它会出现在本机 Docker 容器环境配置中，因此只有可信管理员可以访问 Docker API；绝不能提交真实文件到 GitHub。
+
+## 完整隔离拓扑
+
+需要 LAN HTTPS、Caddy 路径白名单、Token 只读文件和完全离线 cloudflared 时，使用以下拓扑：
 
 ```text
 公网用户
@@ -17,7 +44,7 @@
 
 公网入口只允许 `/`、`/api/v1/*`、账号验证/重置资源和健康端点。`/admin*`、`/install*`、`/api/admin/*` 永远不会进入 Tunnel。后端 `9009` 不发布到 WAN。
 
-## 推荐：一个包、一条命令
+## 完整隔离：一个包、一条命令
 
 GitHub Release 会生成：
 
@@ -51,9 +78,9 @@ tar -xzf kekeio-tab-router-arm64.tar.gz && sh kekeio-tab-router-arm64/install.sh
 
 ## 必须先处理的安全事项
 
-1. 用户消息中出现过的 Cloudflare Tunnel Token 已经泄露。先在 Cloudflare 控制台轮换 Token，并强制断开旧连接；若 Tunnel 尚未投入生产，直接删除后重新创建最省事。
-2. 不要再使用 `--network container:kekeio-tab`，也不要把它改成 `container:kekeio-tab-backend` 或 `container:kekeio-tab-caddy`。共享 namespace 会绕过 Caddy 路径白名单，甚至让后端把请求误认为 loopback 或可信代理。
-3. 新 Token 只写入路由器上的权限受限文件，不放进命令参数、`.env`、Compose 环境变量、Git、聊天或截图。
+1. 示例 Token 可以写占位值；真实 Token 只能保存在路由器本地配置，不放进源码、Git、Release、聊天或截图。
+2. 只有本页“Docker 直接运行”的完整参数允许 `--network container:kekeio-tab`；不要删掉可信代理、精确管理 CIDR 或 LAN 端口绑定，也不要套用到其他容器。
+3. 完整隔离模式继续使用只读 Token 文件；直接模式按用户要求使用受限的 `cloudflared.env`，两者都不得提交真实凭据。
 4. 不要把 SimpleDocker 管理页面、Docker socket、后端 `9009`、Tunnel metrics `20241` 暴露到 Tunnel 或 WAN。
 5. 截图中的 Docker Engine `20.10.17` 已非常旧。只运行来源可信、固定版本、校验过摘要的镜像；不要在路由器上构建不可信 Dockerfile。优先等待小米固件或可信维护方提供引擎更新，不要用陈旧的 SimpleDocker 公共源码覆盖当前安装。
 
@@ -88,7 +115,7 @@ docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}'
 
 预期架构为 `aarch64` 或 `arm64`。记录最后一条命令输出的默认 bridge 网关，后面必须写入 `KEKEIO_TUNNEL_ORIGIN_BIND`，不要假定它一定是 `172.17.0.1`。
 
-优先使用 `docker compose`。如果只有 `docker-compose`，把后续命令中的 `docker compose` 替换成 `docker-compose`；两者都没有时，先通过 SimpleDocker 提供的可信安装方式补齐 Compose，不能只启动后端后让 Tunnel 直连 `9009`。
+下文高级完整隔离路径优先使用 `docker compose`。如果只有 `docker-compose`，把后续命令中的 `docker compose` 替换成 `docker-compose`；两者都没有时可改用文首经过约束的 Docker 直接运行路径。
 
 ### 2. 准备完整 ARM64 离线镜像
 
@@ -261,7 +288,7 @@ docker compose -p kekeio-tab \
   up -d --pull never
 ```
 
-标准方案中 cloudflared 固定为 `172.30.88.4`，但后端仍只信任 Caddy 的 `172.30.88.2/32`。任何情况下都不能让 cloudflared 直连 backend。
+标准 Caddy 方案中 cloudflared 固定为 `172.30.88.4`，但后端仍只信任 Caddy 的 `172.30.88.2/32`。不要把文首直启模式的 loopback 信任参数混入该拓扑。
 
 ### 6. 配置 Cloudflare Published application
 
@@ -287,7 +314,7 @@ http://172.17.0.1:18081
 
 在 `Additional application settings -> HTTP settings -> HTTP Host Header` 中填写 `.env` 的 `KEKEIO_TUNNEL_ORIGIN_HOST` 完整值。不要填公开域名，也不要留空；Cloudflare 会在 cloudflared 访问 Caddy 时覆盖 Host，Caddy 则拒绝缺少该随机值的直连请求。
 
-不要添加指向 `backend:9009`、`localhost:9009`、路由器管理页面或 SimpleDocker 的任何 Published application。
+完整 Caddy 模式不要填写 `backend:9009` 或 `localhost:9009`；只有文首两个容器直启模式固定填写 `http://localhost:9009`。任何模式都不得把路由器管理页面或 SimpleDocker 发布到 Tunnel。
 
 Tunnel 会建立出站连接，不需要开放或转发 WAN `80/443/8080/8443/9009/18081/20241`。删除指向家庭公网 IP 的旧 A/AAAA 记录，避免绕过 Tunnel；让控制台为 Tunnel 管理对应代理 DNS。Cloudflare 边缘启用 HTTP 到 HTTPS 重定向。
 

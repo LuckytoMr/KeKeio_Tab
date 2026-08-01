@@ -100,6 +100,14 @@ func TestEnvBoolRejectsInvalidSecurityConfiguration(t *testing.T) {
 	}
 }
 
+func TestEnvBoolAcceptsExplicitLANHTTPOptIn(t *testing.T) {
+	t.Setenv("FULLPRO_ALLOW_INSECURE_ADMIN_HTTP", "true")
+	value, err := envBool("FULLPRO_ALLOW_INSECURE_ADMIN_HTTP", false)
+	if err != nil || !value {
+		t.Fatalf("LAN HTTP opt-in = %v, err = %v", value, err)
+	}
+}
+
 func TestRunAdminResetRevokesAccessAndCreatesOneTimeCode(t *testing.T) {
 	directory := t.TempDir()
 	databasePath := filepath.Join(directory, "fullpro.db")

@@ -43,6 +43,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("parse FULLPRO_COOKIE_SECURE: %v", err)
 	}
+	allowInsecureAdminHTTP, err := envBool("FULLPRO_ALLOW_INSECURE_ADMIN_HTTP", false)
+	if err != nil {
+		log.Fatalf("parse FULLPRO_ALLOW_INSECURE_ADMIN_HTTP: %v", err)
+	}
 
 	store, err := openRecoveredStore(dbPath, secretsPath)
 	if err != nil {
@@ -85,6 +89,7 @@ func main() {
 		MaxBodyBytes:            1 << 20,
 		AdminAllowedCIDRs:       envList("FULLPRO_ADMIN_ALLOWED_CIDRS"),
 		TrustedProxyCIDRs:       envList("FULLPRO_TRUSTED_PROXIES"),
+		AllowInsecureAdminHTTP:  allowInsecureAdminHTTP,
 		PasswordHashConcurrency: envInt("FULLPRO_PASSWORD_HASH_CONCURRENCY", 2),
 		AuthRateLimit: server.RateLimitConfig{
 			Limit:  envInt("FULLPRO_AUTH_RATE_LIMIT", 20),

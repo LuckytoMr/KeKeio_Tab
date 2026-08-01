@@ -70,6 +70,8 @@ $tunnelComposeText = Read-WorkspaceText -Paths @(
 $tunnelCaddyText = Get-Content -LiteralPath (Join-Path $routerDeployRoot "Caddyfile.tunnel") -Raw
 $tunnelPublicCaddyText = ($tunnelCaddyText -split '# 管理入口只监听', 2)[0]
 $routerInstallerText = Get-Content -LiteralPath (Join-Path $routerDeployRoot "install.sh") -Raw
+$directDockerText = Get-Content -LiteralPath (Join-Path $root "docker命令.txt") -Raw
+$directTunnelEnvExample = Get-Content -LiteralPath (Join-Path $routerDeployRoot "cloudflared.env.example") -Raw
 
 Assert-Absent -Name "生产后端不得内置固定管理员口令" -Text $backendText -Pattern '(?i)fixedAdminPassword|ensureFixedAdmin|2231'
 Assert-Present -Name "本地 dev 命令必须显式标注固定测试口令" -Text $localDevCommandText -Pattern 'const\s+localDevelopmentPassword\s*=\s*"2231"'
@@ -99,10 +101,24 @@ Assert-Absent -Name "一键安装器不得通过环境变量传递 Tunnel Token"
 Assert-Absent -Name "一键安装器不得挂载 Docker socket" -Text $routerInstallerText -Pattern '/var/run/docker\.sock'
 Assert-Absent -Name "一键安装器不得在线拉取浮动镜像" -Text $routerInstallerText -Pattern '(?i)docker\s+pull|cloudflared:latest'
 Assert-Present -Name "一键安装器必须从离线包加载镜像" -Text $routerInstallerText -Pattern 'docker\s+load\s+-i'
-Assert-Present -Name "一键安装器必须从只读文件传递 Tunnel Token" -Text $routerInstallerText -Pattern 'cloudflare-tunnel-token:ro'
+Assert-Present -Name "一键安装器必须从只读命名卷传递 Tunnel Token" -Text $routerInstallerText -Pattern '\$\{TOKEN_VOLUME\}:/run/secrets:ro'
 Assert-Present -Name "一键安装器必须让 cloudflared 使用默认 bridge" -Text $routerInstallerText -Pattern '--network\s+bridge'
 Assert-Present -Name "一键安装器必须通过 Caddy 固定地址收窄可信代理" -Text $routerInstallerText -Pattern 'FULLPRO_TRUSTED_PROXIES=\$\{CADDY_IP\}/32'
 Assert-Present -Name "一键安装器必须绑定真实 LAN 管理地址" -Text $routerInstallerText -Pattern '\$\{LAN_IP\}:8443:443/tcp'
+Assert-Present -Name "一键安装器必须使用 Docker 数据命名卷" -Text $routerInstallerText -Pattern '\$\{DATA_VOLUME\}:/data'
+Assert-Present -Name "一键安装器必须使用 Docker 备份命名卷" -Text $routerInstallerText -Pattern '\$\{BACKUP_VOLUME\}:/backups'
+Assert-Present -Name "一键安装器必须通过命名卷提供 Caddyfile" -Text $routerInstallerText -Pattern '\$\{CADDYFILE_VOLUME\}:/etc/caddy:ro'
+
+Assert-Absent -Name "直接模式示例不得包含 JWT 形态 Tunnel Token" -Text ($directDockerText + "`n" + $directTunnelEnvExample) -Pattern 'eyJ[A-Za-z0-9_-]{80,}'
+Assert-Present -Name "直接模式必须从本地 env 文件读取 Tunnel Token" -Text $directDockerText -Pattern '--env-file\s+cloudflared\.env'
+Assert-Present -Name "直接模式必须收窄 loopback 可信代理" -Text $directDockerText -Pattern 'FULLPRO_TRUSTED_PROXIES=127\.0\.0\.1/32'
+Assert-Present -Name "直接模式必须固定管理 LAN" -Text $directDockerText -Pattern 'FULLPRO_ADMIN_ALLOWED_CIDRS=127\.0\.0\.1/32,::1/128,192\.168\.50\.0/24'
+Assert-Present -Name "直接模式只能在固定 LAN IP 发布后端" -Text $directDockerText -Pattern '192\.168\.50\.1:9009:9009/tcp'
+Assert-Present -Name "直接模式必须显式开启 LAN HTTP 管理" -Text $directDockerText -Pattern 'FULLPRO_ALLOW_INSECURE_ADMIN_HTTP=true'
+Assert-Present -Name "直接模式必须使用应用数据命名卷" -Text $directDockerText -Pattern 'kekeio-tab-data:/data'
+Assert-Present -Name "直接模式必须共享经过约束的应用网络命名空间" -Text $directDockerText -Pattern '--network\s+container:kekeio-tab'
+Assert-Present -Name "生产入口必须读取 LAN HTTP 显式开关" -Text $backendText -Pattern 'envBool\("FULLPRO_ALLOW_INSECURE_ADMIN_HTTP",\s*false\)'
+Assert-Present -Name "生产入口必须把 LAN HTTP 显式开关传入服务配置" -Text $backendText -Pattern 'AllowInsecureAdminHTTP:\s+allowInsecureAdminHTTP'
 
 Assert-Absent -Name "后台源码不得使用 innerHTML" -Text $adminText -Pattern '(?i)\.innerHTML\s*='
 $requiredHosts = @($manifest.host_permissions)

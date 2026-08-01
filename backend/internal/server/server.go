@@ -614,7 +614,7 @@ func (a *App) handleAdminIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !a.isAdminNetworkRequest(r) {
-		writeError(w, http.StatusForbidden, "admin network required")
+		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
 	if !a.isAdminTransportSecure(r) {
@@ -1088,7 +1088,7 @@ func bearerToken(r *http.Request) string {
 func (a *App) requireAdminNetwork(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !a.isAdminNetworkRequest(r) {
-			writeError(w, http.StatusForbidden, "admin network required")
+			writeError(w, http.StatusNotFound, "not found")
 			return
 		}
 		if !a.isAdminTransportSecure(r) {
@@ -1102,7 +1102,7 @@ func (a *App) requireAdminNetwork(next http.HandlerFunc) http.HandlerFunc {
 func (a *App) requireAdminNetworkHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !a.isAdminNetworkRequest(r) {
-			writeError(w, http.StatusForbidden, "admin network required")
+			writeError(w, http.StatusNotFound, "not found")
 			return
 		}
 		if !a.isAdminTransportSecure(r) {

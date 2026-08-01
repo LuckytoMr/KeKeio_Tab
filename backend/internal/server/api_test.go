@@ -215,7 +215,7 @@ func TestAdminRoutesRequireAllowedNetwork(t *testing.T) {
 	req.AddCookie(cookie)
 	res := httptest.NewRecorder()
 	handler.ServeHTTP(res, req)
-	if res.Code != http.StatusForbidden {
+	if res.Code != http.StatusNotFound {
 		t.Fatalf("remote admin status = %d, body = %s", res.Code, res.Body.String())
 	}
 }

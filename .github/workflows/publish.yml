@@ -187,6 +187,13 @@ jobs:
         run: |
           mkdir -p release
           mv "${RUNNER_TEMP}/kekeio-tab-docker-arm64.tar" release/kekeio-tab-docker-arm64.tar
+          direct_dir="release/kekeio-tab-simpledocker-arm64"
+          mkdir -p "${direct_dir}"
+          cp release/kekeio-tab-docker-arm64.tar "${direct_dir}/kekeio-tab-docker-arm64.tar"
+          cp docker命令.txt "${direct_dir}/docker命令.txt"
+          cp backend/deploy/router/cloudflared.env.example "${direct_dir}/cloudflared.env.example"
+          (cd release && zip -qr kekeio-tab-simpledocker-arm64.zip kekeio-tab-simpledocker-arm64)
+          rm -rf "${direct_dir}"
           bundle_dir="release/kekeio-tab-router-arm64"
           mkdir -p "${bundle_dir}"
           mv "${RUNNER_TEMP}/kekeio-tab-router-images-arm64.tar" "${bundle_dir}/images.tar"

@@ -17,6 +17,7 @@ secrets.json
 install-code
 cloudflare-tunnel-token
 cloudflared-token
+cloudflared.env
 backend/deploy/router/secrets/
 backend/deploy/router/runtime/
 

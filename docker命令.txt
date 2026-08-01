@@ -1,10 +1,87 @@
-安全说明：
-1. 旧 Cloudflare Tunnel Token 已暴露，必须先在 Cloudflare 控制台轮换并强制断开旧连接。
-2. 不要把新 Token 写进本文件、.env、docker run 参数或聊天记录。
-3. 不要使用 --network container:kekeio-tab；它会绕过部署中的公网路径白名单，并可能把管理入口暴露给 Tunnel。
+KeKeIO Tab 小米路由器 / SimpleDocker 直接启动
 
-ARM64 应用镜像导入：
+一、首次只配置一次 Tunnel Token
+
+把 cloudflared.env.example 复制为 cloudflared.env，只替换等号后面的占位符：
+
+TUNNEL_TOKEN=你的CloudflareTunnelToken
+
+cloudflared.env 只保存在路由器本地，不上传 GitHub。以后重启或重建容器继续复用该文件，不再输入 Token。
+
+二、加载 ARM64 应用镜像
+
 docker load -i kekeio-tab-docker-arm64.tar
 
-正式启动、Tunnel Token 文件创建、Cloudflare 控制台配置和验收命令：
-请按 backend/deploy/router/README.md 的“Cloudflare Tunnel”章节执行。
+三、直接启动 KeKeIO Tab
+
+docker run -d \
+  --name kekeio-tab \
+  --restart unless-stopped \
+  --stop-timeout 30 \
+  --read-only \
+  --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+  --security-opt no-new-privileges:true \
+  --cap-drop ALL \
+  --pids-limit 128 \
+  --log-driver json-file \
+  --log-opt max-size=10m \
+  --log-opt max-file=3 \
+  -p 192.168.50.1:9009:9009/tcp \
+  -e FULLPRO_ADDR=:9009 \
+  -e FULLPRO_DB=/data/fullpro.db \
+  -e FULLPRO_BACKUP_DIRECTORY=/backups \
+  -e FULLPRO_PUBLIC_BASE_URL=https://tab.kekeio.com \
+  -e FULLPRO_COOKIE_SECURE=false \
+  -e FULLPRO_ALLOW_INSECURE_ADMIN_HTTP=true \
+  -e FULLPRO_ADMIN_ALLOWED_CIDRS=127.0.0.1/32,::1/128,192.168.50.0/24 \
+  -e FULLPRO_TRUSTED_PROXIES=127.0.0.1/32 \
+  -v kekeio-tab-data:/data \
+  -v kekeio-tab-backups:/backups \
+  kekeio-tab:arm64
+
+四、拉取并启动最新版 cloudflared
+
+docker pull cloudflare/cloudflared:latest
+
+docker run -d \
+  --name cloudflared-tab \
+  --restart unless-stopped \
+  --stop-timeout 30 \
+  --network container:kekeio-tab \
+  --env-file cloudflared.env \
+  --read-only \
+  --tmpfs /tmp:rw,noexec,nosuid,size=16m \
+  --security-opt no-new-privileges:true \
+  --cap-drop ALL \
+  --pids-limit 128 \
+  --log-driver json-file \
+  --log-opt max-size=10m \
+  --log-opt max-file=3 \
+  --health-cmd 'cloudflared tunnel --metrics 127.0.0.1:20241 ready' \
+  --health-interval 30s \
+  --health-timeout 5s \
+  --health-start-period 30s \
+  --health-retries 3 \
+  cloudflare/cloudflared:latest \
+  tunnel --no-autoupdate --metrics 127.0.0.1:20241 run
+
+五、Cloudflare Published application
+
+Hostname: tab.kekeio.com
+Type: HTTP
+Service URL: http://localhost:9009
+HTTP Host Header: 留空
+
+局域网首次安装：http://192.168.50.1:9009/install
+局域网后台：http://192.168.50.1:9009/admin
+
+查看安装码：
+
+docker logs --tail 100 kekeio-tab
+
+检查运行状态：
+
+docker ps --filter name=kekeio-tab --filter name=cloudflared-tab
+docker logs --tail 100 cloudflared-tab
+
+注意：该直启模式仅将 9009 绑定到固定 LAN 地址 192.168.50.1，并明确允许局域网 HTTP 管理。不要把 9009 做 WAN 端口转发。公网 /install、/admin 和 /api/admin/* 必须返回 404。

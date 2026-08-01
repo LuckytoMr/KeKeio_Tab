@@ -4,15 +4,22 @@ KeKeIO Tab 的单机自托管后端，提供邮箱验证账号、`SharedProfile 
 
 ## Docker 正式部署
 
-正式后端统一监听容器端口 `9009`，并由 Caddy 提供严格路径白名单。小米路由器推荐使用 Cloudflare Tunnel：公网只进入 Caddy 的公网专用监听器，安装与后台使用独立的 LAN HTTPS 入口，后端端口不发布。
+正式后端统一监听容器端口 `9009`。固定 LAN 为 `192.168.50.1/24` 的小米/SimpleDocker 可使用 Release 中的 `kekeio-tab-simpledocker-arm64.zip`，按包内 `docker命令.txt` 直接启动应用和 cloudflared 两个容器：
 
-推荐从 GitHub Release 下载一键包，上传后执行：
+```sh
+docker load -i kekeio-tab-docker-arm64.tar
+# cloudflared.env 只填写一次 Token，然后执行 docker命令.txt 中的 docker run
+```
+
+该模式使用 Docker 命名卷，避免 SimpleDocker 容器终端与宿主机 bind mount 路径不一致导致 SQLite `unable to open database file (14)`。Cloudflare origin 固定为 `http://localhost:9009`；后端只信任共享命名空间的 loopback cloudflared，并从 `X-Forwarded-For` 恢复真实客户端 IP。公网管理路径由后端隐藏为 `404`。
+
+需要 Caddy 公网白名单、LAN HTTPS 和只读 Token 文件时，使用完整隔离包：
 
 ```sh
 tar -xzf kekeio-tab-router-arm64.tar.gz && sh kekeio-tab-router-arm64/install.sh
 ```
 
-脚本直接调用 Docker，不要求路由器安装 Compose；它会自动加载三张 ARM64 镜像、检测网络、生成非敏感配置并启动容器。Cloudflare Tunnel Token 只在首次运行时无回显输入并保存到本地受限文件。
+脚本直接调用 Docker，不要求路由器安装 Compose；它会自动加载三张 ARM64 镜像，并以 Docker 命名卷保存数据、备份、Caddyfile 和 Token，避免管理终端路径被 Docker daemon 解释成另一个宿主路径。
 
 - [完整路由器部署指南](deploy/router/README.md)
 - [Docker Compose](deploy/router/compose.yaml)
@@ -21,6 +28,7 @@ tar -xzf kekeio-tab-router-arm64.tar.gz && sh kekeio-tab-router-arm64/install.sh
 - [Tunnel 专用 Caddyfile](deploy/router/Caddyfile.tunnel)
 - [环境变量样例](deploy/router/router.env.example)
 - [一键安装器](deploy/router/install.sh)
+- [直接模式 Token 配置样例](deploy/router/cloudflared.env.example)
 
 以下命令只用于高级手工检查；一键安装不依赖 Compose：
 
@@ -41,7 +49,7 @@ docker compose -p kekeio-tab --env-file .env \
 tar -xzf kekeio-tab-router-arm64.tar.gz && sh kekeio-tab-router-arm64/install.sh
 ```
 
-完整包包含 `kekeio-tab:arm64`、`caddy:2.11.4-alpine`、`cloudflare/cloudflared:2026.7.3`、一键安装器及 Caddy 配置。需要校验外层下载文件时可再下载同名 `.sha256`；安装器始终会校验包内镜像归档。仅含应用的兼容包 `kekeio-tab-docker-arm64.tar` 仍可用 `docker load` 导入，但不提供完整 Tunnel 与管理入口。
+完整包包含 `kekeio-tab:arm64`、`caddy:2.11.4-alpine`、`cloudflare/cloudflared:2026.7.3`、一键安装器及 Caddy 配置。需要校验外层下载文件时可再下载同名 `.sha256`；安装器始终会校验包内镜像归档。`kekeio-tab-simpledocker-arm64.zip` 则包含应用镜像、直接命令和 Token 配置样例，cloudflared 会在路由器上拉取当前多架构 `latest`。
 
 只有选择高级手工模式时，才需要在 `deploy/router/.env` 中设置镜像、LAN、CIDR、Docker bridge gateway 和 Token 文件路径，再执行：
 
@@ -51,7 +59,7 @@ docker compose -p kekeio-tab --env-file .env \
   up -d --pull never
 ```
 
-离线路径不登录 GHCR，也不执行 pull。新 Tunnel Token 只能通过本地只读文件挂载；不要放入命令、环境变量或 Git。`bin/fullpro-server-linux-arm64` 是非 Docker 场景的裸二进制，不能执行 `docker load -i bin/fullpro-server-linux-arm64`。
+完整隔离路径不登录 GHCR，也不执行 pull。直接模式按用户要求把 Token 保存在路由器本地 `cloudflared.env`，它会进入 cloudflared 容器配置，因此只能由可信管理员访问 Docker；真实文件已被 `.gitignore` 排除，绝不能提交 Git。`bin/fullpro-server-linux-arm64` 是非 Docker 场景的裸二进制，不能执行 `docker load -i bin/fullpro-server-linux-arm64`。
 
 Tunnel 链路为：
 
@@ -59,7 +67,7 @@ Tunnel 链路为：
 https://tab.kekeio.com -> Cloudflare Edge -> cloudflared -> Caddy :8081 -> backend:9009
 ```
 
-Tunnel 只需出站连接，不做 WAN 端口转发。严禁使用 `--network container:...`，也不要把 Tunnel origin 设置为 backend 或 `localhost:9009`；这会绕过 Caddy 公网白名单和后端代理信任边界。
+Tunnel 只需出站连接，不做 WAN 端口转发。只有 `docker命令.txt` 的固定直启模式允许 `--network container:kekeio-tab`：它同时设置 `FULLPRO_TRUSTED_PROXIES=127.0.0.1/32`、精确管理 CIDR、LAN 专用端口和公网管理路径隐藏。不要删减这些参数，也不要把同样的共享 namespace 套到旧镜像或其他服务上。
 
 镜像以 UID/GID `10001` 非 root 用户运行。使用宿主机目录前必须预创建 `/data` 与 `/backups` 对应路径并 `chown 10001:10001`；优先使用 ext4 等支持 SQLite 锁、WAL、原子 rename 和 Unix 权限的本地文件系统。Docker 启动时会验证 `/backups` 可写并执行 `fsync`，失败直接退出。同一磁盘上的两个目录只提供逻辑隔离；灾备仍需第二介质或离机复制。
 
@@ -71,7 +79,13 @@ Tunnel 只需出站连接，不做 WAN 端口转发。严禁使用 `--network co
 docker compose --env-file .env -f compose.yaml logs backend
 ```
 
-Tunnel 模式先按完整指南导出并信任 Caddy 本地 CA，然后在允许的局域网中打开：
+直接模式从允许的局域网打开：
+
+```text
+http://192.168.50.1:9009/install
+```
+
+完整隔离模式先按完整指南导出并信任 Caddy 本地 CA，然后打开：
 
 ```text
 https://<路由器LAN地址>:8443/install
@@ -119,6 +133,7 @@ FULLPRO_INSTALL_CODE=<可选的显式一次性安装码>
 FULLPRO_COOKIE_NAME=fullpro_session
 FULLPRO_INSTALL_COOKIE_NAME=fullpro_install
 FULLPRO_COOKIE_SECURE=true
+FULLPRO_ALLOW_INSECURE_ADMIN_HTTP=false
 FULLPRO_PUBLIC_BASE_URL=https://tab.kekeio.com
 FULLPRO_ADMIN_ALLOWED_CIDRS=127.0.0.1/32,::1/128,192.168.50.0/24
 FULLPRO_TRUSTED_PROXIES=<Caddy容器IP>/32
@@ -127,6 +142,8 @@ FULLPRO_AUTH_RATE_WINDOW_SECONDS=60
 FULLPRO_PASSWORD_HASH_CONCURRENCY=2
 FULLPRO_HEALTHCHECK_URL=http://127.0.0.1:9009/health/live
 ```
+
+`FULLPRO_ALLOW_INSECURE_ADMIN_HTTP` 默认必须保持 `false`。只有 `docker命令.txt` 中把 `9009` 精确绑定到固定 LAN IP、关闭 WAN 转发的 SimpleDocker 直启模式才设置为 `true`，并同时把 `FULLPRO_COOKIE_SECURE` 设为 `false`；公网 Tunnel 请求仍会依据可信代理的 `X-Forwarded-Proto: https` 自动使用 Secure Cookie。
 
 `FULLPRO_BACKUP_DIRECTORY` 是启动时强制覆盖项，优先级高于安装向导保存的备份目录；后端会在开始监听前验证该目录可写并执行 `fsync`。Docker 正式部署应保持为 `/backups`，不要再通过向导改到容器外不可见的宿主路径。
 

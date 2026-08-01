@@ -362,7 +362,7 @@ func TestTrustedProxyFailsClosedOnMissingOrMalformedClientHeaders(t *testing.T) 
 			}
 			response := httptest.NewRecorder()
 			app.Routes().ServeHTTP(response, request)
-			if response.Code != http.StatusForbidden {
+			if response.Code != http.StatusNotFound {
 				t.Fatalf("trusted proxy %s client header reached admin: %d %s", name, response.Code, response.Body.String())
 			}
 		})
@@ -472,8 +472,8 @@ func TestAdminAssetsUseNetworkGateAndSPARoutesFallBackToIndex(t *testing.T) {
 	remoteAsset.RemoteAddr = "203.0.113.8:9000"
 	remoteResponse := httptest.NewRecorder()
 	handler.ServeHTTP(remoteResponse, remoteAsset)
-	if remoteResponse.Code != http.StatusForbidden {
-		t.Fatalf("remote admin asset = %d %s, want 403", remoteResponse.Code, remoteResponse.Body.String())
+	if remoteResponse.Code != http.StatusNotFound {
+		t.Fatalf("remote admin asset = %d %s, want 404", remoteResponse.Code, remoteResponse.Body.String())
 	}
 
 	deepLink := httptest.NewRequest(http.MethodGet, "/admin/users", nil)
