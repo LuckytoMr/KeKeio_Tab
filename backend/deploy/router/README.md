@@ -4,7 +4,7 @@
 
 ## 最简：Docker 直接运行
 
-GitHub Release 的 `kekeio-tab-simpledocker-arm64.zip` 包含：
+GitHub Actions 的成功摘要会直接链接到 `main-latest` 滚动预发布；其中的 `kekeio-tab-simpledocker-arm64.zip` 包含：
 
 ```text
 kekeio-tab-docker-arm64.tar

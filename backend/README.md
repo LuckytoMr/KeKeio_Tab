@@ -4,7 +4,7 @@ KeKeIO Tab 的单机自托管后端，提供邮箱验证账号、`SharedProfile 
 
 ## Docker 正式部署
 
-正式后端统一监听容器端口 `9009`。固定 LAN 为 `192.168.50.1/24` 的小米/SimpleDocker 可使用 Release 中的 `kekeio-tab-simpledocker-arm64.zip`，按包内 `docker命令.txt` 直接启动应用和 cloudflared 两个容器：
+正式后端统一监听容器端口 `9009`。固定 LAN 为 `192.168.50.1/24` 的小米/SimpleDocker 可使用 `main-latest` 或正式 Release 中的 `kekeio-tab-simpledocker-arm64.zip`，按包内 `docker命令.txt` 直接启动应用和 cloudflared 两个容器：
 
 ```sh
 docker load -i kekeio-tab-docker-arm64.tar
@@ -43,7 +43,7 @@ docker compose -p kekeio-tab --env-file .env \
 
 ### 一键 ARM64 Docker 包
 
-从 `v*` GitHub Release 下载完整路由器包并执行：
+从 `main-latest` 滚动预发布或 `v*` 正式 GitHub Release 下载完整路由器包并执行：
 
 ```sh
 tar -xzf kekeio-tab-router-arm64.tar.gz && sh kekeio-tab-router-arm64/install.sh

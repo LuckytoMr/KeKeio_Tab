@@ -63,7 +63,7 @@ docker compose --env-file .env -f compose.yaml up -d
 ghcr.io/<GitHub用户名>/kekeio-tab:sha-<完整提交SHA>
 ```
 
-普通 `main` 推送或未选择 `v*` 标签的 `workflow_dispatch` 只做验证和镜像发布，不创建 Actions Artifact。推送 `v*` 标签时，GitHub Actions 会在云端构建发布包，并在同一个 Job 中直接上传到 GitHub Release：`kekeio-tab-backend.zip`、`kekeio-tab-extension.zip`、应用镜像 `kekeio-tab-docker-arm64.tar`、直接运行包 `kekeio-tab-simpledocker-arm64.zip`、完整隔离包 `kekeio-tab-router-arm64.tar.gz` 及各自的 `.sha256` 校验文件。重跑同一个标签会安全覆盖同名 Release 资源。
+普通 `main` 推送验证通过后，会在云端构建归档并覆盖 `main-latest` 预发布，Actions 摘要直接显示下载链接；始终只保留一份滚动构建，不创建 Actions Artifact。推送 `v*` 标签时则上传到对应正式 GitHub Release。两种发布均包含 `kekeio-tab-backend.zip`、`kekeio-tab-extension.zip`、应用镜像 `kekeio-tab-docker-arm64.tar`、直接运行包 `kekeio-tab-simpledocker-arm64.zip`、完整隔离包 `kekeio-tab-router-arm64.tar.gz` 及各自的 `.sha256` 校验文件。
 
 ```sh
 git tag v0.1.0

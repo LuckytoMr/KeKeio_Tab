@@ -44,10 +44,10 @@ function Assert-Present {
 $backendSources = Get-ChildItem -LiteralPath (Join-Path $root "backend") -Recurse -File -Filter "*.go" |
     Where-Object { $_.Name -notlike "*_test.go" } |
     ForEach-Object FullName
-$localDevCommandPath = [IO.Path]::GetFullPath((Join-Path $root "backend\cmd\fullpro-server\main.go"))
-$productionBackendSources = $backendSources | Where-Object { [IO.Path]::GetFullPath($_) -ne $localDevCommandPath }
+$serverCommandPath = [IO.Path]::GetFullPath((Join-Path $root "backend\cmd\fullpro-server\main.go"))
+$productionBackendSources = $backendSources | Where-Object { [IO.Path]::GetFullPath($_) -ne $serverCommandPath }
 $backendText = Read-WorkspaceText -Paths $productionBackendSources
-$localDevCommandText = Get-Content -LiteralPath $localDevCommandPath -Raw
+$serverCommandText = Get-Content -LiteralPath $serverCommandPath -Raw
 
 $adminSourceRoot = Join-Path $root "backend\admin-ui\src"
 $adminSources = if (Test-Path -LiteralPath $adminSourceRoot) {
@@ -72,11 +72,12 @@ $tunnelPublicCaddyText = ($tunnelCaddyText -split '# 管理入口只监听', 2)[
 $routerInstallerText = Get-Content -LiteralPath (Join-Path $routerDeployRoot "install.sh") -Raw
 $directDockerText = Get-Content -LiteralPath (Join-Path $root "docker命令.txt") -Raw
 $directTunnelEnvExample = Get-Content -LiteralPath (Join-Path $routerDeployRoot "cloudflared.env.example") -Raw
+$publishWorkflowText = Get-Content -LiteralPath (Join-Path $root ".github\workflows\publish.yml") -Raw
 
 Assert-Absent -Name "生产后端不得内置固定管理员口令" -Text $backendText -Pattern '(?i)fixedAdminPassword|ensureFixedAdmin|2231'
-Assert-Present -Name "本地 dev 命令必须显式标注固定测试口令" -Text $localDevCommandText -Pattern 'const\s+localDevelopmentPassword\s*=\s*"2231"'
-Assert-Present -Name "本地 dev 命令必须显式开启弱口令例外" -Text $localDevCommandText -Pattern 'AllowWeakPassword:\s*true'
-Assert-Present -Name "本地 dev 命令必须保持开发模式隔离" -Text $localDevCommandText -Pattern 'DevelopmentMode:\s*true'
+Assert-Present -Name "本地 dev 命令必须显式标注固定测试口令" -Text $serverCommandText -Pattern 'const\s+localDevelopmentPassword\s*=\s*"2231"'
+Assert-Present -Name "本地 dev 命令必须显式开启弱口令例外" -Text $serverCommandText -Pattern 'AllowWeakPassword:\s*true'
+Assert-Present -Name "本地 dev 命令必须保持开发模式隔离" -Text $serverCommandText -Pattern 'DevelopmentMode:\s*true'
 Assert-Absent -Name "CORS 不得放行任意扩展 ID" -Text $backendText -Pattern 'HasPrefix\s*\(\s*origin\s*,\s*"chrome-extension://"'
 Assert-Present -Name "后端必须提供版本化同步端点" -Text $backendText -Pattern '/api/v1/sync/profile'
 Assert-Present -Name "后端必须提供同步历史恢复端点" -Text $backendText -Pattern '/api/v1/sync/profile/versions'
@@ -117,8 +118,11 @@ Assert-Present -Name "直接模式只能在固定 LAN IP 发布后端" -Text $di
 Assert-Present -Name "直接模式必须显式开启 LAN HTTP 管理" -Text $directDockerText -Pattern 'FULLPRO_ALLOW_INSECURE_ADMIN_HTTP=true'
 Assert-Present -Name "直接模式必须使用应用数据命名卷" -Text $directDockerText -Pattern 'kekeio-tab-data:/data'
 Assert-Present -Name "直接模式必须共享经过约束的应用网络命名空间" -Text $directDockerText -Pattern '--network\s+container:kekeio-tab'
-Assert-Present -Name "生产入口必须读取 LAN HTTP 显式开关" -Text $backendText -Pattern 'envBool\("FULLPRO_ALLOW_INSECURE_ADMIN_HTTP",\s*false\)'
-Assert-Present -Name "生产入口必须把 LAN HTTP 显式开关传入服务配置" -Text $backendText -Pattern 'AllowInsecureAdminHTTP:\s+allowInsecureAdminHTTP'
+Assert-Present -Name "生产入口必须读取 LAN HTTP 显式开关" -Text $serverCommandText -Pattern 'envBool\("FULLPRO_ALLOW_INSECURE_ADMIN_HTTP",\s*false\)'
+Assert-Present -Name "生产入口必须把 LAN HTTP 显式开关传入服务配置" -Text $serverCommandText -Pattern 'AllowInsecureAdminHTTP:\s+allowInsecureAdminHTTP'
+Assert-Absent -Name "CI 不得重新消耗 Actions Artifact 配额" -Text $publishWorkflowText -Pattern 'actions/upload-artifact'
+Assert-Present -Name "main 构建必须覆盖滚动 Release" -Text $publishWorkflowText -Pattern 'release_tag="main-latest"'
+Assert-Present -Name "CI 必须在 Actions 摘要提供下载链接" -Text $publishWorkflowText -Pattern 'GITHUB_STEP_SUMMARY'
 
 Assert-Absent -Name "后台源码不得使用 innerHTML" -Text $adminText -Pattern '(?i)\.innerHTML\s*='
 $requiredHosts = @($manifest.host_permissions)

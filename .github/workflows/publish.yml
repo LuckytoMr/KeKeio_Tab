@@ -82,7 +82,7 @@ jobs:
 
   package:
     name: Build and publish release archives
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     needs: [verify, publish-image]
     runs-on: ubuntu-latest
     permissions:
@@ -223,11 +223,43 @@ jobs:
         run: |
           set -euo pipefail
           assets=(release/*.zip release/*.tar release/*.tar.gz release/*.sha256)
-          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
-            gh release upload "${GITHUB_REF_NAME}" "${assets[@]}" --clobber
+
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            release_tag="${GITHUB_REF_NAME}"
+            if gh release view "${release_tag}" >/dev/null 2>&1; then
+              gh release upload "${release_tag}" "${assets[@]}" --clobber
+            else
+              gh release create "${release_tag}" "${assets[@]}" --generate-notes --title "KeKeIO Tab ${release_tag}"
+            fi
           else
-            gh release create "${GITHUB_REF_NAME}" "${assets[@]}" --generate-notes --title "KeKeIO Tab ${GITHUB_REF_NAME}"
+            release_tag="main-latest"
+            release_title="KeKeIO Tab main 最新构建 (${GITHUB_SHA:0:7})"
+            release_notes="由 main 分支 ${GITHUB_SHA} 自动构建。每次 main 构建成功后覆盖，下载文件不占用 Actions Artifact 配额。"
+            if gh release view "${release_tag}" >/dev/null 2>&1; then
+              gh api --method PATCH \
+                "repos/${GITHUB_REPOSITORY}/git/refs/tags/${release_tag}" \
+                -f "sha=${GITHUB_SHA}" -F force=true >/dev/null
+              gh release upload "${release_tag}" "${assets[@]}" --clobber
+              gh release edit "${release_tag}" --prerelease --title "${release_title}" --notes "${release_notes}"
+            else
+              gh release create "${release_tag}" "${assets[@]}" \
+                --target "${GITHUB_SHA}" --prerelease \
+                --title "${release_title}" --notes "${release_notes}"
+            fi
           fi
+
+          download_base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${release_tag}"
+          {
+            echo "## 下载本次构建"
+            echo
+            echo "- [小米 / SimpleDocker ARM64 直启包](${download_base}/kekeio-tab-simpledocker-arm64.zip)"
+            echo "- [ARM64 Docker 镜像 tar](${download_base}/kekeio-tab-docker-arm64.tar)"
+            echo "- [ARM64 完整隔离包](${download_base}/kekeio-tab-router-arm64.tar.gz)"
+            echo "- [浏览器扩展 ZIP](${download_base}/kekeio-tab-extension.zip)"
+            echo "- [查看全部 Release 文件](https://github.com/${GITHUB_REPOSITORY}/releases/tag/${release_tag})"
+            echo
+            echo "以上文件直接存放在 GitHub Release，不使用 Actions Artifact 配额。"
+          } >> "${GITHUB_STEP_SUMMARY}"
 
   publish-image:
     name: Publish GHCR image
