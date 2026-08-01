@@ -14,16 +14,16 @@ cloudflared.env.example
 
 操作顺序：
 
-1. 把 `cloudflared.env.example` 复制为 `cloudflared.env`，只在等号后填写一次 Tunnel Token，并执行 `chmod 600 cloudflared.env`。
-2. 执行 `docker load -i kekeio-tab-docker-arm64.tar`。
-3. 原样执行 `docker命令.txt` 中的两个 `docker run`。
+1. 保留路由器现有的 `cloudflared.env`；首次部署才把示例复制为该文件并填写一次 Tunnel Token。
+2. 执行 `docker load -i kekeio-tab-docker-arm64.tar`。归档同时载入后端与 GitHub 构建时最新的 ARM64 cloudflared，不需要另行 pull。
+3. 原样执行 `docker命令.txt` 中的两个 `docker run`，顺序必须是应用在前、cloudflared 在后。
 4. Cloudflare Published application 填 `HTTP`、`http://localhost:9009`，HTTP Host Header 留空。
 
-该模式把应用数据和备份放入 `kekeio-tab-data`、`kekeio-tab-backups` 命名卷，不依赖 SimpleDocker 容器终端的路径与宿主机路径相同。LAN 安装入口为 `http://192.168.50.1:9009/install`；`9009` 只绑定这个 LAN 地址，严禁 WAN 转发。
+该模式把应用数据固定到 `/mnt/usb-24aeefbb/mi_docker/kekeio/data`，备份固定到同级 `backups`。这些路径由宿主 Docker daemon 解释，不使用 SimpleDocker 终端内部的 `/data`。Docker 首次自动创建 bind 目录时通常属于 root；镜像入口只修正这两个挂载点，验证可写后立即降权为 UID `10001`，避免 SQLite `unable to open database file (14)`。LAN 安装入口为 `http://192.168.50.1:9009/install`；`9009` 只绑定这个 LAN 地址，严禁 WAN 转发。
 
-`cloudflared` 通过 `--network container:kekeio-tab` 访问 loopback。这个用法只有在命令同时保留 `FULLPRO_TRUSTED_PROXIES=127.0.0.1/32`、精确管理 CIDR 和 LAN HTTP 显式开关时才受支持：Cloudflare 提供的 `X-Forwarded-For` 会用于恢复真实公网客户端 IP，公网管理路径因此返回 `404`，而不是被误认为 loopback 管理员。
+`cloudflared` 通过 `--network container:kekeio-tab` 访问 loopback。这个用法只有在命令同时保留 `FULLPRO_TRUSTED_PROXIES=127.0.0.1/32`、精确管理 CIDR 和 LAN HTTP 显式开关时才受支持：Cloudflare 提供的 `X-Forwarded-For` 会用于恢复真实公网客户端 IP，公网管理路径因此返回 `404`，而不是被误认为 loopback 管理员。目标 SimpleDocker 会把 LAN 请求呈现为默认 bridge 网关，因此只把已确认的 `172.17.0.1/32` 加入管理 CIDR；它绝不能加入可信代理。
 
-Token 保存在路由器本地 `cloudflared.env`，以后 `docker restart` 或按同一命令重建都不再交互输入。它会出现在本机 Docker 容器环境配置中，因此只有可信管理员可以访问 Docker API；绝不能提交真实文件到 GitHub。
+Token 保存在路由器本地 `cloudflared.env`，以后 `docker restart` 或按同一命令重建都不再交互输入。它会出现在本机 Docker 容器环境配置中，因此只有可信管理员可以访问 Docker API；绝不能提交真实文件到 GitHub。删除并重建应用容器时必须同时重建 cloudflared，因为 `container:` 绑定的是目标容器的网络命名空间。
 
 ## 完整隔离拓扑
 
@@ -149,13 +149,13 @@ docker image inspect cloudflare/cloudflared:2026.7.3 --format '{{.Os}}/{{.Archit
 
 三个结果都必须是 `linux/arm64`。
 
-用户已有的命令仍可导入仅含应用的旧包：
+当前直启包可用以下命令同时导入应用与构建时最新的 ARM64 cloudflared：
 
 ```sh
 docker load -i kekeio-tab-docker-arm64.tar
 ```
 
-但该 tar 不包含 Caddy 和 cloudflared。完全离线部署时必须提前另外导入这两个固定版本镜像；不要让旧 Docker 临时拉取浮动 `latest`。
+该 tar 不包含 Caddy；需要 Caddy、固定 cloudflared 版本和完整隔离时应改用本节前面的 `kekeio-tab-router-arm64.tar.gz`，不要混用两套启动方式。
 
 ### 3. 准备目录和环境
 

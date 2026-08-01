@@ -75,15 +75,16 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
           govulncheck ./...
 
-      - name: Verify router one-click installer
+      - name: Verify deployment scripts
         run: |
+          sh -n backend/docker-entrypoint.sh
           sh -n backend/deploy/router/install.sh
           sh backend/deploy/router/install.sh --self-test
 
   package:
     name: Build and publish release archives
     if: (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
-    needs: [verify, publish-image]
+    needs: verify
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -134,18 +135,34 @@ jobs:
           file: ./backend/Dockerfile
           platforms: linux/arm64
           tags: kekeio-tab:arm64
-          outputs: type=docker,dest=${{ runner.temp }}/kekeio-tab-docker-arm64.tar
+          outputs: type=docker,dest=${{ runner.temp }}/kekeio-tab-app-arm64.tar
 
-      - name: Verify offline ARM64 Docker archive
+      - name: Assemble and verify offline ARM64 Docker archive
         shell: bash
         run: |
           set -euo pipefail
+          app_archive="${RUNNER_TEMP}/kekeio-tab-app-arm64.tar"
           archive="${RUNNER_TEMP}/kekeio-tab-docker-arm64.tar"
+          test -s "${app_archive}"
+          docker load -i "${app_archive}"
+          docker pull --platform linux/arm64 cloudflare/cloudflared:latest
+          test "$(docker image inspect kekeio-tab:arm64 --format '{{.Os}}/{{.Architecture}}')" = "linux/arm64"
+          test "$(docker image inspect cloudflare/cloudflared:latest --format '{{.Os}}/{{.Architecture}}')" = "linux/arm64"
+
+          docker save \
+            --output "${archive}" \
+            kekeio-tab:arm64 \
+            cloudflare/cloudflared:latest
           test -s "${archive}"
+          docker image rm kekeio-tab:arm64 cloudflare/cloudflared:latest >/dev/null
           docker load -i "${archive}"
           test "$(docker image inspect kekeio-tab:arm64 --format '{{.Os}}/{{.Architecture}}')" = "linux/arm64"
+          test "$(docker image inspect cloudflare/cloudflared:latest --format '{{.Os}}/{{.Architecture}}')" = "linux/arm64"
 
           container_name="kekeio-tab-offline-verify"
+          bind_root="${RUNNER_TEMP}/kekeio-tab-offline-bind"
+          bridge_gateway="$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}')"
+          mkdir -p "${bind_root}"
           cleanup() {
             docker rm -f -v "${container_name}" >/dev/null 2>&1 || true
           }
@@ -154,19 +171,38 @@ jobs:
           docker run -d \
             --name "${container_name}" \
             --platform linux/arm64 \
-            -e FULLPRO_ADMIN_ALLOWED_CIDRS=127.0.0.1/32 \
+            -e "FULLPRO_ADMIN_ALLOWED_CIDRS=127.0.0.1/32,${bridge_gateway}/32" \
+            -e FULLPRO_COOKIE_SECURE=false \
+            -e FULLPRO_ALLOW_INSECURE_ADMIN_HTTP=true \
+            -v "${bind_root}/data:/data" \
+            -v "${bind_root}/backups:/backups" \
             -p 127.0.0.1:9009:9009 \
             kekeio-tab:arm64
 
+          healthy=false
           for attempt in $(seq 1 30); do
             if curl --fail --silent --show-error http://127.0.0.1:9009/health/live >/dev/null; then
-              exit 0
+              healthy=true
+              break
             fi
             sleep 2
           done
 
-          docker logs "${container_name}"
-          exit 1
+          if [[ "${healthy}" != true ]]; then
+            docker logs "${container_name}"
+            exit 1
+          fi
+
+          curl --fail --silent --show-error http://127.0.0.1:9009/install >/dev/null
+          test -s "${bind_root}/data/fullpro.db"
+          test "$(stat -c '%u:%g' "${bind_root}/data")" = "10001:10001"
+          test "$(stat -c '%u:%g' "${bind_root}/backups")" = "10001:10001"
+          test "$(docker exec "${container_name}" sh -c "awk '/^Uid:/{print \$2}' /proc/1/status")" = "10001"
+          docker run --rm \
+            --platform linux/arm64 \
+            --network "container:${container_name}" \
+            cloudflare/cloudflared:latest \
+            --version
 
       - name: Build complete ARM64 router archive
         shell: bash
@@ -207,7 +243,7 @@ jobs:
           tar -tzf release/kekeio-tab-router-arm64.tar.gz | grep -Fx 'kekeio-tab-router-arm64/install.sh'
           rm -rf "${bundle_dir}"
           cd backend
-          zip -qr ../release/kekeio-tab-backend.zip cmd internal admin-ui bin deploy Dockerfile .dockerignore .env.example go.mod go.sum README.md \
+          zip -qr ../release/kekeio-tab-backend.zip cmd internal admin-ui bin deploy Dockerfile docker-entrypoint.sh .dockerignore .env.example go.mod go.sum README.md \
             -x 'admin-ui/node_modules/*' 'admin-ui/dist/*' 'admin-ui/coverage/*'
           cd ../extension
           zip -qr ../release/kekeio-tab-extension.zip dist

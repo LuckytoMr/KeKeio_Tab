@@ -2,6 +2,7 @@ services:
   backend:
     image: "${KEKEIO_IMAGE:?Set KEKEIO_IMAGE to a release or sha tag in the deployment .env file}"
     container_name: kekeio-tab-backend
+    user: "10001:10001"
     restart: unless-stopped
     stop_grace_period: 30s
     environment:

@@ -401,6 +401,7 @@ docker run -d \
   --network "$EDGE_NETWORK" \
   --network-alias backend \
   --ip "$BACKEND_IP" \
+  --user 10001:10001 \
   --read-only \
   --tmpfs /tmp:rw,noexec,nosuid,size=64m \
   --security-opt no-new-privileges:true \

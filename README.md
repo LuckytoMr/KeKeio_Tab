@@ -13,14 +13,14 @@ KeKeIO Tab 是一个本地优先的新标签页扩展，配套单机自托管同
 
 ## Docker 正式部署
 
-后端只支持 Docker 正式部署。当前固定设备（LAN `192.168.50.1/24`）推荐下载 `kekeio-tab-simpledocker-arm64.zip`，解压后只需配置一次本地 `cloudflared.env`，再按包内 `docker命令.txt` 直接运行：
+后端只支持 Docker 正式部署。当前固定设备（LAN `192.168.50.1/24`）推荐下载 `kekeio-tab-simpledocker-arm64.zip`，解压到已保存 `cloudflared.env` 的目录后，按包内 `docker命令.txt` 直接运行：
 
 ```sh
 docker load -i kekeio-tab-docker-arm64.tar
 # 然后执行 docker命令.txt 中的两个 docker run
 ```
 
-应用数据和备份使用 Docker 命名卷，不依赖 SimpleDocker 容器终端中的 `/data` 与宿主机路径一致。Token 只写入路由器本地 `cloudflared.env` 一次，容器重启或按相同命令重建时直接复用。Cloudflare Published application 固定填写 `http://localhost:9009`，不再填写 LAN CIDR、bridge 网关或 HTTP Host Header。
+这个 tar 同时包含 `kekeio-tab:arm64` 和 GitHub 构建时最新的 `cloudflare/cloudflared:latest`，路由器无需另外 pull。应用数据固定写入 `/mnt/usb-24aeefbb/mi_docker/kekeio/data`，备份固定写入同级 `backups`；镜像会先修正这两个专用挂载点的权限，再以 UID `10001` 运行后端。Token 只写入路由器本地 `cloudflared.env` 一次，重建时继续复用。Cloudflare Published application 固定填写 `http://localhost:9009`，不再填写 bridge 网关或 HTTP Host Header。
 
 直接模式链路：
 
@@ -63,7 +63,7 @@ docker compose --env-file .env -f compose.yaml up -d
 ghcr.io/<GitHub用户名>/kekeio-tab:sha-<完整提交SHA>
 ```
 
-普通 `main` 推送验证通过后，会在云端构建归档并覆盖 `main-latest` 预发布，Actions 摘要直接显示下载链接；始终只保留一份滚动构建，不创建 Actions Artifact。推送 `v*` 标签时则上传到对应正式 GitHub Release。两种发布均包含 `kekeio-tab-backend.zip`、`kekeio-tab-extension.zip`、应用镜像 `kekeio-tab-docker-arm64.tar`、直接运行包 `kekeio-tab-simpledocker-arm64.zip`、完整隔离包 `kekeio-tab-router-arm64.tar.gz` 及各自的 `.sha256` 校验文件。
+普通 `main` 推送验证通过后，会在云端构建归档并覆盖 `main-latest` 预发布，Actions 摘要直接显示下载链接；始终只保留一份滚动构建，不创建 Actions Artifact。推送 `v*` 标签时则上传到对应正式 GitHub Release。两种发布均包含 `kekeio-tab-backend.zip`、`kekeio-tab-extension.zip`、应用与 cloudflared 双镜像归档 `kekeio-tab-docker-arm64.tar`、直接运行包 `kekeio-tab-simpledocker-arm64.zip`、完整隔离包 `kekeio-tab-router-arm64.tar.gz` 及各自的 `.sha256` 校验文件。
 
 ```sh
 git tag v0.1.0

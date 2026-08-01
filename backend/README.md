@@ -8,10 +8,10 @@ KeKeIO Tab 的单机自托管后端，提供邮箱验证账号、`SharedProfile 
 
 ```sh
 docker load -i kekeio-tab-docker-arm64.tar
-# cloudflared.env 只填写一次 Token，然后执行 docker命令.txt 中的 docker run
+# 保留已有 cloudflared.env，然后执行 docker命令.txt 中的两个 docker run
 ```
 
-该模式使用 Docker 命名卷，避免 SimpleDocker 容器终端与宿主机 bind mount 路径不一致导致 SQLite `unable to open database file (14)`。Cloudflare origin 固定为 `http://localhost:9009`；后端只信任共享命名空间的 loopback cloudflared，并从 `X-Forwarded-For` 恢复真实客户端 IP。公网管理路径由后端隐藏为 `404`。
+该模式使用宿主机已确认的固定路径 `/mnt/usb-24aeefbb/mi_docker/kekeio`，避免 SimpleDocker 终端中的 `/data` 被 Docker daemon 解释为另一个宿主路径。镜像入口会初始化两个专用挂载点后降权到 UID `10001`，修复 Docker 自动创建 root 目录导致的 SQLite `unable to open database file (14)`。Cloudflare origin 固定为 `http://localhost:9009`；后端只信任共享命名空间的 loopback cloudflared，并从 `X-Forwarded-For` 恢复真实客户端 IP。公网管理路径由后端隐藏为 `404`。
 
 需要 Caddy 公网白名单、LAN HTTPS 和只读 Token 文件时，使用完整隔离包：
 
@@ -49,7 +49,7 @@ docker compose -p kekeio-tab --env-file .env \
 tar -xzf kekeio-tab-router-arm64.tar.gz && sh kekeio-tab-router-arm64/install.sh
 ```
 
-完整包包含 `kekeio-tab:arm64`、`caddy:2.11.4-alpine`、`cloudflare/cloudflared:2026.7.3`、一键安装器及 Caddy 配置。需要校验外层下载文件时可再下载同名 `.sha256`；安装器始终会校验包内镜像归档。`kekeio-tab-simpledocker-arm64.zip` 则包含应用镜像、直接命令和 Token 配置样例，cloudflared 会在路由器上拉取当前多架构 `latest`。
+完整包包含 `kekeio-tab:arm64`、`caddy:2.11.4-alpine`、`cloudflare/cloudflared:2026.7.3`、一键安装器及 Caddy 配置。需要校验外层下载文件时可再下载同名 `.sha256`；安装器始终会校验包内镜像归档。`kekeio-tab-simpledocker-arm64.zip` 则包含应用和构建时最新 cloudflared 的 ARM64 离线镜像、直接命令及 Token 配置样例。
 
 只有选择高级手工模式时，才需要在 `deploy/router/.env` 中设置镜像、LAN、CIDR、Docker bridge gateway 和 Token 文件路径，再执行：
 
@@ -69,7 +69,7 @@ https://tab.kekeio.com -> Cloudflare Edge -> cloudflared -> Caddy :8081 -> backe
 
 Tunnel 只需出站连接，不做 WAN 端口转发。只有 `docker命令.txt` 的固定直启模式允许 `--network container:kekeio-tab`：它同时设置 `FULLPRO_TRUSTED_PROXIES=127.0.0.1/32`、精确管理 CIDR、LAN 专用端口和公网管理路径隐藏。不要删减这些参数，也不要把同样的共享 namespace 套到旧镜像或其他服务上。
 
-镜像以 UID/GID `10001` 非 root 用户运行。使用宿主机目录前必须预创建 `/data` 与 `/backups` 对应路径并 `chown 10001:10001`；优先使用 ext4 等支持 SQLite 锁、WAL、原子 rename 和 Unix 权限的本地文件系统。Docker 启动时会验证 `/backups` 可写并执行 `fsync`，失败直接退出。同一磁盘上的两个目录只提供逻辑隔离；灾备仍需第二介质或离机复制。
+镜像入口仅以 root 初始化 `/data` 与 `/backups` 两个专用挂载点并验证可写，随后通过 `su-exec` 降权为 UID/GID `10001` 运行后端；业务进程不会长期使用 root。固定 USB 分区应使用 ext4 等支持 SQLite 锁、WAL、原子 rename 和 Unix 权限的本地 Linux 文件系统。Docker 启动时还会验证 `/backups` 可写，失败直接退出。同一磁盘上的两个目录只提供逻辑隔离；灾备仍需第二介质或离机复制。
 
 ### 首次安装
 

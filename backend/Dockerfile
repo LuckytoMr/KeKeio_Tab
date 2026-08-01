@@ -18,11 +18,13 @@ ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/fullpro-server ./cmd/fullpro-server
 
 FROM alpine:3.24
-RUN apk add --no-cache wget && adduser -D -H -u 10001 fullpro
+RUN apk add --no-cache su-exec wget && adduser -D -H -u 10001 fullpro
 WORKDIR /app
 COPY --from=build /out/fullpro-server /usr/local/bin/fullpro-server
-RUN mkdir -p /data /backups && chown -R fullpro:fullpro /data /backups
-USER fullpro
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN mkdir -p /data /backups \
+	&& chown -R fullpro:fullpro /data /backups \
+	&& chmod 0755 /usr/local/bin/docker-entrypoint.sh
 ENV FULLPRO_ADDR=:9009
 ENV FULLPRO_DB=/data/fullpro.db
 ENV FULLPRO_BACKUP_DIRECTORY=/backups
@@ -33,4 +35,5 @@ VOLUME ["/data", "/backups"]
 STOPSIGNAL SIGTERM
 HEALTHCHECK --interval=30s --timeout=3s --start-period=30s --retries=3 \
 	CMD wget -q -T 2 -O /dev/null "$FULLPRO_HEALTHCHECK_URL" || exit 1
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["fullpro-server"]

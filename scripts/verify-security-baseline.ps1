@@ -72,6 +72,7 @@ $tunnelPublicCaddyText = ($tunnelCaddyText -split '# 管理入口只监听', 2)[
 $routerInstallerText = Get-Content -LiteralPath (Join-Path $routerDeployRoot "install.sh") -Raw
 $directDockerText = Get-Content -LiteralPath (Join-Path $root "docker命令.txt") -Raw
 $directTunnelEnvExample = Get-Content -LiteralPath (Join-Path $routerDeployRoot "cloudflared.env.example") -Raw
+$dockerEntrypointText = Get-Content -LiteralPath (Join-Path $root "backend\docker-entrypoint.sh") -Raw
 $publishWorkflowText = Get-Content -LiteralPath (Join-Path $root ".github\workflows\publish.yml") -Raw
 
 Assert-Absent -Name "生产后端不得内置固定管理员口令" -Text $backendText -Pattern '(?i)fixedAdminPassword|ensureFixedAdmin|2231'
@@ -106,6 +107,7 @@ Assert-Present -Name "一键安装器必须从只读命名卷传递 Tunnel Token
 Assert-Present -Name "一键安装器必须让 cloudflared 使用默认 bridge" -Text $routerInstallerText -Pattern '--network\s+bridge'
 Assert-Present -Name "一键安装器必须通过 Caddy 固定地址收窄可信代理" -Text $routerInstallerText -Pattern 'FULLPRO_TRUSTED_PROXIES=\$\{CADDY_IP\}/32'
 Assert-Present -Name "一键安装器必须绑定真实 LAN 管理地址" -Text $routerInstallerText -Pattern '\$\{LAN_IP\}:8443:443/tcp'
+Assert-Present -Name "完整安装器必须显式以非 root 后端用户运行" -Text $routerInstallerText -Pattern '--user\s+10001:10001'
 Assert-Present -Name "一键安装器必须使用 Docker 数据命名卷" -Text $routerInstallerText -Pattern '\$\{DATA_VOLUME\}:/data'
 Assert-Present -Name "一键安装器必须使用 Docker 备份命名卷" -Text $routerInstallerText -Pattern '\$\{BACKUP_VOLUME\}:/backups'
 Assert-Present -Name "一键安装器必须通过命名卷提供 Caddyfile" -Text $routerInstallerText -Pattern '\$\{CADDYFILE_VOLUME\}:/etc/caddy:ro'
@@ -113,11 +115,16 @@ Assert-Present -Name "一键安装器必须通过命名卷提供 Caddyfile" -Tex
 Assert-Absent -Name "直接模式示例不得包含 JWT 形态 Tunnel Token" -Text ($directDockerText + "`n" + $directTunnelEnvExample) -Pattern 'eyJ[A-Za-z0-9_-]{80,}'
 Assert-Present -Name "直接模式必须从本地 env 文件读取 Tunnel Token" -Text $directDockerText -Pattern '--env-file\s+cloudflared\.env'
 Assert-Present -Name "直接模式必须收窄 loopback 可信代理" -Text $directDockerText -Pattern 'FULLPRO_TRUSTED_PROXIES=127\.0\.0\.1/32'
-Assert-Present -Name "直接模式必须固定管理 LAN" -Text $directDockerText -Pattern 'FULLPRO_ADMIN_ALLOWED_CIDRS=127\.0\.0\.1/32,::1/128,192\.168\.50\.0/24'
+Assert-Present -Name "直接模式必须固定管理 LAN 与已确认 bridge 网关" -Text $directDockerText -Pattern 'FULLPRO_ADMIN_ALLOWED_CIDRS=127\.0\.0\.1/32,::1/128,192\.168\.50\.0/24,172\.17\.0\.1/32'
 Assert-Present -Name "直接模式只能在固定 LAN IP 发布后端" -Text $directDockerText -Pattern '192\.168\.50\.1:9009:9009/tcp'
 Assert-Present -Name "直接模式必须显式开启 LAN HTTP 管理" -Text $directDockerText -Pattern 'FULLPRO_ALLOW_INSECURE_ADMIN_HTTP=true'
-Assert-Present -Name "直接模式必须使用应用数据命名卷" -Text $directDockerText -Pattern 'kekeio-tab-data:/data'
+Assert-Present -Name "直接模式必须使用固定 USB 数据目录" -Text $directDockerText -Pattern '/mnt/usb-24aeefbb/mi_docker/kekeio/data:/data'
+Assert-Present -Name "直接模式必须使用固定 USB 备份目录" -Text $directDockerText -Pattern '/mnt/usb-24aeefbb/mi_docker/kekeio/backups:/backups'
 Assert-Present -Name "直接模式必须共享经过约束的应用网络命名空间" -Text $directDockerText -Pattern '--network\s+container:kekeio-tab'
+Assert-Present -Name "直接包必须离线包含最新版 cloudflared" -Text $publishWorkflowText -Pattern 'docker\s+save[\s\S]*cloudflare/cloudflared:latest'
+Assert-Present -Name "bind mount 初始化后必须降权运行" -Text $dockerEntrypointText -Pattern 'exec\s+su-exec\s+10001:10001'
+Assert-Present -Name "bind mount 必须在降权前验证可写" -Text $dockerEntrypointText -Pattern 'su-exec\s+10001:10001\s+sh\s+-c'
+Assert-Absent -Name "bind mount 初始化不得递归改写宿主目录" -Text $dockerEntrypointText -Pattern 'chown\s+-R'
 Assert-Present -Name "生产入口必须读取 LAN HTTP 显式开关" -Text $serverCommandText -Pattern 'envBool\("FULLPRO_ALLOW_INSECURE_ADMIN_HTTP",\s*false\)'
 Assert-Present -Name "生产入口必须把 LAN HTTP 显式开关传入服务配置" -Text $serverCommandText -Pattern 'AllowInsecureAdminHTTP:\s+allowInsecureAdminHTTP'
 Assert-Absent -Name "CI 不得重新消耗 Actions Artifact 配额" -Text $publishWorkflowText -Pattern 'actions/upload-artifact'
