@@ -35,6 +35,8 @@ export interface WorkerApi {
   listOfficialWallpapers(accessToken: string): Promise<unknown>;
   listWebWallpapers(accessToken: string, query?: string): Promise<unknown>;
   listStyles(accessToken: string): Promise<unknown>;
+  fetchUhdpaperPage(accessToken: string, url: string): Promise<unknown>;
+  fetchUhdpaperImage(accessToken: string, url: string): Promise<unknown>;
 }
 
 export type WorkerApiFactory = (baseUrl: string) => WorkerApi;
@@ -528,7 +530,7 @@ export class SyncWorkerRuntime {
   }
 
   async getCatalog(
-    kind: "bootstrap" | "official-wallpapers" | "web-wallpapers" | "styles",
+    kind: "bootstrap" | "official-wallpapers" | "web-wallpapers" | "styles" | "uhdpaper-page" | "uhdpaper-image",
     query = "",
     publicBaseUrl?: string
   ) {
@@ -544,6 +546,8 @@ export class SyncWorkerRuntime {
     return this.authenticated(credentials.accountScope, credentials.sessionGeneration, (token, api) => {
       if (kind === "official-wallpapers") return api.listOfficialWallpapers(token);
       if (kind === "web-wallpapers") return api.listWebWallpapers(token, query);
+      if (kind === "uhdpaper-page") return api.fetchUhdpaperPage(token, query);
+      if (kind === "uhdpaper-image") return api.fetchUhdpaperImage(token, query);
       return api.listStyles(token);
     }, { requireFull: true, requireReady: true });
   }

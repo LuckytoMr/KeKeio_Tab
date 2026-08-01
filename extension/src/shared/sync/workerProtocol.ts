@@ -14,7 +14,12 @@ export type SyncWorkerMessage =
   | { type: "sync:get-conflict"; conflictId: string }
   | { type: "sync:resolve-conflict"; conflictId: string; profile: SharedProfileV2 }
   | { type: "catalog:get"; kind: "bootstrap" }
-  | { type: "catalog:get"; kind: "official-wallpapers" | "web-wallpapers" | "styles"; query?: string };
+  | {
+      type: "catalog:get";
+      kind: "official-wallpapers" | "web-wallpapers" | "styles";
+      query?: string;
+    }
+  | { type: "catalog:get"; kind: "uhdpaper-page" | "uhdpaper-image"; query: string };
 
 export interface WorkerRuntimePort {
   login(input: { baseUrl: string; email: string; password: string }): Promise<unknown>;
@@ -27,7 +32,11 @@ export interface WorkerRuntimePort {
   drain(): Promise<unknown>;
   getConflict(conflictId: string): Promise<unknown>;
   resolveConflict(conflictId: string, profile: SharedProfileV2): Promise<unknown>;
-  getCatalog(kind: "bootstrap" | "official-wallpapers" | "web-wallpapers" | "styles", query?: string, baseUrl?: string): Promise<unknown>;
+  getCatalog(
+    kind: "bootstrap" | "official-wallpapers" | "web-wallpapers" | "styles" | "uhdpaper-page" | "uhdpaper-image",
+    query?: string,
+    baseUrl?: string
+  ): Promise<unknown>;
 }
 
 async function getFixedBackendSession(runtime: WorkerRuntimePort) {

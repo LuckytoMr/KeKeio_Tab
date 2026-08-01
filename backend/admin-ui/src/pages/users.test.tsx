@@ -34,3 +34,30 @@ describe("UserDetailPage version recovery", () => {
     expect(dialog).not.toHaveTextContent("pver_opaque_secret_id");
   });
 });
+
+describe("UserDetailPage browser sessions", () => {
+  it("shows recognized browsers, versions and a legacy fallback", async () => {
+    const client = clientStub({
+      get: vi.fn().mockResolvedValue({
+        user: {
+          id: "user-2", email: "browser@example.test", status: "active", verificationStatus: "verified",
+          browserCount: 3, browserFamilies: ["chrome", "edge", "unknown"]
+        },
+        sessions: [
+          { id: "edge-session", deviceId: "device-edge-1234567890", browserFamily: "edge", browserVersion: "127.0.2651.74", lastUsedAt: "2026-08-01T09:00:00Z" },
+          { id: "chrome-session", deviceId: "device-chrome", browserFamily: "chrome", browserVersion: "126.0.0.0", lastUsedAt: "2026-08-01T08:00:00Z" },
+          { id: "legacy-session", deviceName: "device-legacy", lastUsedAt: "2026-08-01T07:00:00Z" }
+        ],
+        attempts: [], versions: [], profile: null
+      })
+    });
+    render(<UserDetailPage client={client} route={parseAdminLocation("/admin/users/user-2")} onNavigate={vi.fn()} notify={vi.fn()} />);
+
+    expect(await screen.findByText("Microsoft Edge 127.0.2651.74")).toBeInTheDocument();
+    expect(screen.getByText("Google Chrome 126.0.0.0")).toBeInTheDocument();
+    expect(screen.getAllByText("未知浏览器").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/最近认证/)).toHaveLength(3);
+    expect(screen.getByRole("button", { name: "撤销 Microsoft Edge 127.0.2651.74 的会话" })).toBeInTheDocument();
+    expect(screen.getByText("浏览器首次写入云端后会显示诊断记录。")).toBeInTheDocument();
+  });
+});

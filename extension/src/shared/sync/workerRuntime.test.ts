@@ -753,6 +753,39 @@ describe("SyncWorkerRuntime", () => {
     expect(await vault.loadPrivate()).toBeUndefined();
   });
 
+  it("routes UHDpaper page and image reads through the signed-in backend client", async () => {
+    await vault.save({
+      version: 2,
+      scope: "full",
+      sessionGeneration: "session:uhdpaper",
+      firstConnectionPending: false,
+      accountScope: "account:one",
+      baseUrl: "https://sync.example.test",
+      userId: "user:one",
+      email: "one@example.test",
+      accessToken: "access-a",
+      accessExpiresAt: 999_999,
+      refreshToken: "refresh-a",
+      refreshExpiresAt: 9_999_999,
+      updatedAt: 1
+    });
+    const fetchUhdpaperPage = vi.fn(async () => ({ html: "<html></html>" }));
+    const fetchUhdpaperImage = vi.fn(async () => ({ mimeType: "image/jpeg", dataUrl: "data:image/jpeg;base64,AA==" }));
+    const api = { fetchUhdpaperPage, fetchUhdpaperImage } as unknown as WorkerApi;
+    const runtime = new SyncWorkerRuntime(store, vault, () => api, () => 100);
+    const pageUrl = "https://www.uhdpaper.com/?page=2";
+    const imageUrl = "https://img.uhdpaper.com/wallpaper/space.jpg";
+
+    await expect(runtime.getCatalog("uhdpaper-page", pageUrl)).resolves.toEqual({ html: "<html></html>" });
+    await expect(runtime.getCatalog("uhdpaper-image", imageUrl)).resolves.toEqual({
+      mimeType: "image/jpeg",
+      dataUrl: "data:image/jpeg;base64,AA=="
+    });
+
+    expect(fetchUhdpaperPage).toHaveBeenCalledWith("access-a", pageUrl);
+    expect(fetchUhdpaperImage).toHaveBeenCalledWith("access-a", imageUrl);
+  });
+
   it("classifies the four first-connection states without treating starter defaults as user data", () => {
     expect(classifyFirstConnection(false, false)).toBe("both-empty");
     expect(classifyFirstConnection(true, false)).toBe("local-only");

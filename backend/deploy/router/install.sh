@@ -32,11 +32,11 @@ DEPLOYMENT_COMPLETE=0
 CREATED_CONTAINERS=""
 
 log() {
-  printf '%s\n' "[KeKeIO] $*"
+  printf '%s\n' "[kekeio] $*"
 }
 
 die() {
-  printf '%s\n' "[KeKeIO] 错误：$*" >&2
+  printf '%s\n' "[kekeio] 错误：$*" >&2
   exit 1
 }
 
@@ -139,7 +139,7 @@ detect_lan_cidr() {
 
   candidate="${KEKEIO_DEFAULT_LAN_CIDR:-192.168.50.1/24}"
   is_ipv4_cidr "$candidate" || die "默认 LAN 地址格式无效：$candidate"
-  printf '%s\n' "[KeKeIO] 未检测到宿主 LAN，使用固定默认值 $candidate" >&2
+  printf '%s\n' "[kekeio] 未检测到宿主 LAN，使用固定默认值 $candidate" >&2
   printf '%s\n' "$candidate"
 }
 

@@ -232,11 +232,11 @@ jobs:
               clean_release_assets "${release_tag}"
               gh release upload "${release_tag}" "${assets[@]}" --clobber
             else
-              gh release create "${release_tag}" "${assets[@]}" --generate-notes --title "KeKeIO Tab ${release_tag}"
+              gh release create "${release_tag}" "${assets[@]}" --generate-notes --title "kekeio ${release_tag}"
             fi
           else
             release_tag="main-latest"
-            release_title="KeKeIO Tab main 最新构建 (${GITHUB_SHA:0:7})"
+            release_title="kekeio main 最新构建 (${GITHUB_SHA:0:7})"
             release_notes="由 main 分支 ${GITHUB_SHA} 自动构建。每次 main 构建成功后覆盖，下载文件不占用 Actions Artifact 配额。"
             if gh release view "${release_tag}" >/dev/null 2>&1; then
               gh api --method PATCH \

@@ -23,7 +23,7 @@ export class GistConflictError extends Error {
 const githubApiBase = "https://api.github.com";
 export const githubProfileFilename = "full-pro-profile.json";
 export const githubTokenCreateUrl =
-  "https://github.com/settings/tokens/new?scopes=gist&description=KeKeIO%20Tab";
+  "https://github.com/settings/tokens/new?scopes=gist&description=kekeio";
 
 export function getGitHubSyncPreview(): SyncPreviewState {
   return {
@@ -45,6 +45,8 @@ function githubHeaders(token: string) {
 async function githubRequest<T>(path: string, token: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`${githubApiBase}${path}`, {
     ...options,
+    credentials: "omit",
+    redirect: "error",
     headers: {
       ...githubHeaders(token),
       ...(options.headers || {})
@@ -60,6 +62,35 @@ async function githubRequest<T>(path: string, token: string, options: RequestIni
     throw new Error(message);
   }
   return data as T;
+}
+
+function validatedGistRawUrl(rawUrl: string) {
+  const url = new URL(rawUrl);
+  if (
+    url.protocol !== "https:" ||
+    url.hostname !== "gist.githubusercontent.com" ||
+    url.port !== "" ||
+    url.username !== "" ||
+    url.password !== "" ||
+    !url.pathname.endsWith(`/${githubProfileFilename}`)
+  ) {
+    throw new Error("GitHub Gist 返回了不受信任的原始文件地址");
+  }
+  url.hash = "";
+  return url.href;
+}
+
+async function githubRawRequest(rawUrl: string): Promise<string> {
+  const response = await fetch(validatedGistRawUrl(rawUrl), {
+    credentials: "omit",
+    redirect: "error",
+    referrerPolicy: "no-referrer"
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`GitHub Gist 原始文件加载失败：${response.status}`);
+  }
+  return text;
 }
 
 export async function saveProfileToGitHubGist(input: {
@@ -78,7 +109,7 @@ export async function saveProfileToGitHubGist(input: {
     }
   }
   const body = {
-    description: input.description || "KeKeIO Tab profile backup",
+    description: input.description || "kekeio profile backup",
     public: false,
     files: {
       [githubProfileFilename]: {
@@ -109,16 +140,16 @@ export async function saveProfileToGitHubGist(input: {
 }
 
 export async function loadProfileFromGitHubGist(input: { token: string; gistId: string }) {
+  const gistPath = `/gists/${encodeURIComponent(input.gistId)}`;
   const gist = await githubRequest<{ files?: Record<string, { content?: string; raw_url?: string; truncated?: boolean }> }>(
-    `/gists/${encodeURIComponent(input.gistId)}`,
+    gistPath,
     input.token
   );
   const file = gist.files?.[githubProfileFilename];
   let content = file?.content;
-  if ((!content || file?.truncated) && file?.raw_url) {
-    const response = await fetch(file.raw_url, { headers: githubHeaders(input.token), credentials: "omit", redirect: "error" });
-    if (!response.ok) throw new Error(`GitHub Gist 原始文件加载失败：${response.status}`);
-    content = await response.text();
+  if (file && (!content || file.truncated)) {
+    if (!file.raw_url) throw new Error(`Gist 中的 ${githubProfileFilename} 缺少原始文件地址`);
+    content = await githubRawRequest(file.raw_url);
   }
   if (!content) {
     throw new Error(`Gist 中没有 ${githubProfileFilename}`);

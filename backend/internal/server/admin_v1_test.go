@@ -449,6 +449,112 @@ func TestAdminV1UserSessionRevokeAndVersionRestoreAreScopedAndAudited(t *testing
 	}
 }
 
+func TestAdminV1UsersExposeActiveBrowserCountAndNormalizedSessions(t *testing.T) {
+	_, store, handler, adminCookie := newAdminV1TestHandler(t)
+	user, err := store.CreateUser(t.Context(), "browser-owner@example.com", "safe-password-123")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if _, err := store.db.ExecContext(t.Context(), `UPDATE users SET status='active',email_verified_at=?,updated_at=? WHERE id=?`, nowString(), nowString(), user.ID); err != nil {
+		t.Fatalf("activate user: %v", err)
+	}
+	if _, err := store.createTokenFamilyForBrowser(t.Context(), user.ID, "device-chrome", clientBrowser{Family: "chrome", Version: "126.0.0.0"}); err != nil {
+		t.Fatalf("create Chrome family: %v", err)
+	}
+	if _, err := store.createTokenFamilyForBrowser(t.Context(), user.ID, "device-chrome", clientBrowser{Family: "chrome", Version: "126.0.0.1"}); err != nil {
+		t.Fatalf("create duplicate Chrome family: %v", err)
+	}
+	edgePair, err := store.createTokenFamilyForBrowser(t.Context(), user.ID, "device-edge", clientBrowser{Family: "edge", Version: "127.0.2651.74"})
+	if err != nil {
+		t.Fatalf("create Edge family: %v", err)
+	}
+	if _, err := store.createTokenFamilyForBrowser(t.Context(), user.ID, "device-revoked", clientBrowser{Family: "safari", Version: "17.6"}); err != nil {
+		t.Fatalf("create revoked family: %v", err)
+	}
+	if _, err := store.db.ExecContext(t.Context(), `UPDATE refresh_token_families SET revoked_at=? WHERE user_id=? AND device_id='device-revoked'`, nowString(), user.ID); err != nil {
+		t.Fatalf("revoke family: %v", err)
+	}
+	if _, err := store.createTokenFamilyForBrowser(t.Context(), user.ID, "device-expired", clientBrowser{Family: "firefox", Version: "128.0"}); err != nil {
+		t.Fatalf("create expired family: %v", err)
+	}
+	if _, err := store.db.ExecContext(t.Context(), `UPDATE refresh_token_families SET expires_at='2000-01-01T00:00:00Z' WHERE user_id=? AND device_id='device-expired'`, user.ID); err != nil {
+		t.Fatalf("expire family: %v", err)
+	}
+	latestUse := "2099-01-02T03:04:05Z"
+	if _, err := store.db.ExecContext(t.Context(), `UPDATE access_tokens SET created_at=? WHERE token_hash=?`, latestUse, tokenHash(edgePair.AccessToken)); err != nil {
+		t.Fatalf("update Edge last use: %v", err)
+	}
+	seenAt := nowString()
+	if _, err := store.db.ExecContext(t.Context(), `INSERT INTO devices(user_id,device_id,first_seen_at,last_seen_at,last_version,revoked_at) VALUES(?,?,?,?,1,'')`, user.ID, "device-chrome", seenAt, seenAt); err != nil {
+		t.Fatalf("seed sync-writing device: %v", err)
+	}
+
+	listResponse := adminV1Request(t, handler, http.MethodGet, "/api/admin/v1/users", "", adminCookie, "")
+	if listResponse.Code != http.StatusOK {
+		t.Fatalf("list users = %d %s", listResponse.Code, listResponse.Body.String())
+	}
+	var listEnvelope struct {
+		Data struct {
+			Items []struct {
+				DeviceCount     int      `json:"deviceCount"`
+				BrowserCount    int      `json:"browserCount"`
+				BrowserFamilies []string `json:"browserFamilies"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(listResponse.Body.Bytes(), &listEnvelope); err != nil {
+		t.Fatalf("decode user list: %v", err)
+	}
+	if len(listEnvelope.Data.Items) != 1 {
+		t.Fatalf("user list items = %#v", listEnvelope.Data.Items)
+	}
+	item := listEnvelope.Data.Items[0]
+	if item.DeviceCount != 1 || item.BrowserCount != 2 || strings.Join(item.BrowserFamilies, ",") != "chrome,edge" {
+		t.Fatalf("user browser summary = %#v", item)
+	}
+
+	detailResponse := adminV1Request(t, handler, http.MethodGet, "/api/admin/v1/users/"+user.ID, "", adminCookie, "")
+	if detailResponse.Code != http.StatusOK {
+		t.Fatalf("user detail = %d %s", detailResponse.Code, detailResponse.Body.String())
+	}
+	var detailEnvelope struct {
+		Data struct {
+			User struct {
+				BrowserCount    int      `json:"browserCount"`
+				BrowserFamilies []string `json:"browserFamilies"`
+			} `json:"user"`
+			Sessions []struct {
+				DeviceID       string `json:"deviceId"`
+				BrowserFamily  string `json:"browserFamily"`
+				BrowserVersion string `json:"browserVersion"`
+				LastUsedAt     string `json:"lastUsedAt"`
+			} `json:"sessions"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(detailResponse.Body.Bytes(), &detailEnvelope); err != nil {
+		t.Fatalf("decode user detail: %v", err)
+	}
+	if detailEnvelope.Data.User.BrowserCount != 2 || strings.Join(detailEnvelope.Data.User.BrowserFamilies, ",") != "chrome,edge" {
+		t.Fatalf("detail browser summary = %#v", detailEnvelope.Data.User)
+	}
+	foundEdge := false
+	for _, session := range detailEnvelope.Data.Sessions {
+		if session.DeviceID == "device-revoked" || session.DeviceID == "device-expired" {
+			t.Fatalf("inactive session exposed: %#v", session)
+		}
+		if session.DeviceID != "device-edge" {
+			continue
+		}
+		foundEdge = true
+		if session.BrowserFamily != "edge" || session.BrowserVersion != "127.0.2651.74" || session.LastUsedAt != latestUse {
+			t.Fatalf("Edge session = %#v", session)
+		}
+	}
+	if !foundEdge {
+		t.Fatalf("Edge session missing: %#v", detailEnvelope.Data.Sessions)
+	}
+}
+
 func TestAdminV1UserVersionsExposeOnlyStructuralAndChangeSummaries(t *testing.T) {
 	_, store, handler, adminCookie := newAdminV1TestHandler(t)
 	user, err := store.CreateUser(t.Context(), "version-summary@example.com", "safe-password-123")

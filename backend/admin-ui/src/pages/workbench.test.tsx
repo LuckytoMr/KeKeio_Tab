@@ -51,12 +51,33 @@ describe("UsersPage", () => {
     expect(screen.getByLabelText("搜索用户")).toHaveValue("alice");
     expect(screen.getByLabelText("账号状态")).toHaveValue("active");
     expect(screen.getByText("alice@example.com")).toBeInTheDocument();
+    expect(screen.getByText("浏览器数量未知")).toBeInTheDocument();
+    expect(screen.getByText("浏览器信息未知")).toBeInTheDocument();
     expect(getWithLegacy.mock.calls[0]?.[0]).toContain("q=alice");
     expect(getWithLegacy.mock.calls[0]?.[0]).toContain("cursor=next%3A1");
 
     await user.click(screen.getByRole("link", { name: "查看 alice@example.com" }));
     expect(onNavigate).toHaveBeenCalledWith(expect.stringContaining("/admin/users/u-1?returnTo="));
     expect(decodeURIComponent(onNavigate.mock.calls[0]?.[0] as string)).toContain("/admin/users?q=alice&status=active&sort=-lastActivityAt&cursor=next%3A1");
+  });
+
+  it("shows active browser instances and recognized browser families", async () => {
+    const client = clientStub({
+      getWithLegacy: vi.fn().mockResolvedValue({
+        items: [{
+          id: "u-2", email: "browser@example.com", status: "active", verificationStatus: "verified",
+          deviceCount: 1, browserCount: 2, browserFamilies: ["chrome", "edge"]
+        }]
+      })
+    });
+    const user = userEvent.setup();
+    render(<UsersPage client={client} route={parseAdminLocation("/admin/users")} onNavigate={vi.fn()} />);
+
+    expect(await screen.findByText("2 个浏览器")).toBeInTheDocument();
+    expect(screen.getByText("Google Chrome、Microsoft Edge")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /browser@example.com 的更多字段/ }));
+    expect(screen.getByText("参与写同步的设备").nextElementSibling).toHaveTextContent("1 个");
+    expect(screen.getAllByText("Google Chrome、Microsoft Edge")).toHaveLength(2);
   });
 });
 

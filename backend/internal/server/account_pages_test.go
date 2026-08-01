@@ -18,8 +18,8 @@ func TestPublicAccountRecoveryPagesUseFragmentTokensAndSameOriginAssets(t *testi
 		apiPath    string
 		title      string
 	}{
-		{path: "/account/verify", scriptSrc: "assets/verify.js", scriptPath: "/account/assets/verify.js", apiPath: "/api/v1/auth/verify-email", title: "验证邮箱 · KeKeIO Tab"},
-		{path: "/account/reset", scriptSrc: "assets/reset.js", scriptPath: "/account/assets/reset.js", apiPath: "/api/v1/auth/reset-password", title: "重置密码 · KeKeIO Tab"},
+		{path: "/account/verify", scriptSrc: "assets/verify.js", scriptPath: "/account/assets/verify.js", apiPath: "/api/v1/auth/verify-email", title: "验证邮箱 · kekeio"},
+		{path: "/account/reset", scriptSrc: "assets/reset.js", scriptPath: "/account/assets/reset.js", apiPath: "/api/v1/auth/reset-password", title: "重置密码 · kekeio"},
 	} {
 		t.Run(testCase.path, func(t *testing.T) {
 			page := httptest.NewRecorder()
@@ -36,8 +36,8 @@ func TestPublicAccountRecoveryPagesUseFragmentTokensAndSameOriginAssets(t *testi
 			if !strings.Contains(page.Body.String(), "<title>"+testCase.title+"</title>") {
 				t.Fatalf("page title does not use product brand %q: %s", testCase.title, page.Body.String())
 			}
-			if !strings.Contains(page.Body.String(), `class="brand-mark" aria-hidden="true">KT</div>`) || !strings.Contains(page.Body.String(), ">KeKeIO Tab Account</p>") {
-				t.Fatalf("page does not use the KeKeIO Tab compact brand: %s", page.Body.String())
+			if !strings.Contains(page.Body.String(), `class="brand-mark" aria-hidden="true">k</div>`) || !strings.Contains(page.Body.String(), ">kekeio Account</p>") {
+				t.Fatalf("page does not use the kekeio compact brand: %s", page.Body.String())
 			}
 			if strings.Contains(page.Body.String(), "token=") {
 				t.Fatalf("page leaked a token into HTML: %s", page.Body.String())
@@ -73,8 +73,8 @@ func TestAccountMailContentUsesFragmentLinkWithoutBareToken(t *testing.T) {
 		path    string
 		subject string
 	}{
-		{kind: "verify_email", path: "/account/verify", subject: "KeKeIO Tab 邮箱验证"},
-		{kind: "reset_password", path: "/account/reset", subject: "KeKeIO Tab 密码重置"},
+		{kind: "verify_email", path: "/account/verify", subject: "kekeio 邮箱验证"},
+		{kind: "reset_password", path: "/account/reset", subject: "kekeio 密码重置"},
 	} {
 		subject, body, err := accountMailContent(MailMessage{
 			Kind:    testCase.kind,

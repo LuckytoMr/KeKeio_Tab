@@ -42,11 +42,11 @@ func (m SMTPMailer) Send(ctx context.Context, message MailMessage) error {
 }
 
 func accountMailContent(message MailMessage) (string, string, error) {
-	subject := "KeKeIO Tab 邮箱验证"
+	subject := "kekeio 邮箱验证"
 	accountPath := "/account/verify"
 	instruction := "请打开下面的链接完成邮箱验证："
 	if message.Kind == "reset_password" {
-		subject = "KeKeIO Tab 密码重置"
+		subject = "kekeio 密码重置"
 		accountPath = "/account/reset"
 		instruction = "请打开下面的链接设置新密码："
 	} else if message.Kind != "verify_email" {
@@ -70,7 +70,7 @@ func accountMailContent(message MailMessage) (string, string, error) {
 }
 
 func TestSMTP(ctx context.Context, input SMTPTestInput) error {
-	return sendSMTP(ctx, input, "KeKeIO Tab SMTP 测试", "KeKeIO Tab 邮件服务配置测试成功。\n")
+	return sendSMTP(ctx, input, "kekeio SMTP 测试", "kekeio 邮件服务配置测试成功。\n")
 }
 
 func sendSMTP(ctx context.Context, input SMTPTestInput, subject, body string) error {

@@ -219,10 +219,20 @@ func (a *App) handleAdminUsersV1(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "INVALID_SORT", "用户排序参数无效")
 		return
 	}
+	queryArgs := append([]any{nowString()}, args...)
 	rows, err := a.store.db.QueryContext(r.Context(), `SELECT
 		u.id,u.email,u.status,u.email_verified_at,u.created_at,u.last_login_at,
-		(SELECT COUNT(*) FROM devices d WHERE d.user_id=u.id AND d.revoked_at='')
-		FROM users u WHERE `+strings.Join(where, " AND ")+` ORDER BY `+order+` LIMIT 100`, args...)
+		(SELECT COUNT(*) FROM devices d WHERE d.user_id=u.id AND d.revoked_at=''),
+		COALESCE(browser_stats.browser_count,0),COALESCE(browser_stats.browser_families,'')
+		FROM users u
+		LEFT JOIN (
+			SELECT user_id,COUNT(DISTINCT device_id) AS browser_count,
+				GROUP_CONCAT(DISTINCT CASE WHEN browser_family='' THEN 'unknown' ELSE browser_family END) AS browser_families
+			FROM refresh_token_families
+			WHERE revoked_at='' AND expires_at>?
+			GROUP BY user_id
+		) browser_stats ON browser_stats.user_id=u.id
+		WHERE `+strings.Join(where, " AND ")+` ORDER BY `+order+` LIMIT 100`, queryArgs...)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "USERS_UNAVAILABLE", "无法读取用户列表")
 		return
@@ -230,9 +240,9 @@ func (a *App) handleAdminUsersV1(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	items := []map[string]any{}
 	for rows.Next() {
-		var id, email, userStatus, verifiedAt, createdAt, lastLoginAt string
-		var deviceCount int
-		if err := rows.Scan(&id, &email, &userStatus, &verifiedAt, &createdAt, &lastLoginAt, &deviceCount); err != nil {
+		var id, email, userStatus, verifiedAt, createdAt, lastLoginAt, browserFamilies string
+		var deviceCount, browserCount int
+		if err := rows.Scan(&id, &email, &userStatus, &verifiedAt, &createdAt, &lastLoginAt, &deviceCount, &browserCount, &browserFamilies); err != nil {
 			writeAPIError(w, http.StatusInternalServerError, "USERS_UNAVAILABLE", "无法读取用户列表")
 			return
 		}
@@ -242,7 +252,8 @@ func (a *App) handleAdminUsersV1(w http.ResponseWriter, r *http.Request) {
 		}
 		items = append(items, map[string]any{
 			"id": id, "email": email, "status": userStatus, "verificationStatus": verification,
-			"lastActivityAt": lastLoginAt, "deviceCount": deviceCount, "createdAt": createdAt,
+			"lastActivityAt": lastLoginAt, "deviceCount": deviceCount, "browserCount": browserCount,
+			"browserFamilies": adminV1BrowserFamilies(browserFamilies), "createdAt": createdAt,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -276,6 +287,11 @@ func (a *App) handleAdminUserDetailV1(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusInternalServerError, "USER_UNAVAILABLE", "无法读取用户会话")
 		return
 	}
+	browserCount, browserFamilies, err := a.adminV1UserBrowserStats(r.Context(), userID)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "USER_UNAVAILABLE", "无法读取用户浏览器")
+		return
+	}
 	attempts, err := a.adminV1UserAttempts(r.Context(), userID)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "USER_UNAVAILABLE", "无法读取同步记录")
@@ -299,7 +315,7 @@ func (a *App) handleAdminUserDetailV1(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeAPIData(w, http.StatusOK, map[string]any{
-		"user":     map[string]any{"id": userID, "email": email, "status": status, "verificationStatus": verification, "createdAt": createdAt, "lastActivityAt": lastLoginAt},
+		"user":     map[string]any{"id": userID, "email": email, "status": status, "verificationStatus": verification, "createdAt": createdAt, "lastActivityAt": lastLoginAt, "browserCount": browserCount, "browserFamilies": browserFamilies},
 		"sessions": sessions, "profile": profile, "attempts": attempts, "versions": versions,
 	})
 }
@@ -2004,20 +2020,56 @@ func (a *App) handleAdminSystemHealthV1(w http.ResponseWriter, r *http.Request) 
 }
 
 func (a *App) adminV1UserSessions(ctx context.Context, userID string) ([]map[string]any, error) {
-	rows, err := a.store.db.QueryContext(ctx, `SELECT id,device_id,created_at,created_at FROM refresh_token_families WHERE user_id=? AND revoked_at='' AND expires_at>? ORDER BY created_at DESC LIMIT 50`, userID, nowString())
+	rows, err := a.store.db.QueryContext(ctx, `SELECT
+		f.id,f.device_id,f.browser_family,f.browser_version,f.created_at,COALESCE(MAX(a.created_at),f.created_at)
+		FROM refresh_token_families f
+		LEFT JOIN access_tokens a ON a.family_id=f.id
+		WHERE f.user_id=? AND f.revoked_at='' AND f.expires_at>?
+		GROUP BY f.id,f.device_id,f.browser_family,f.browser_version,f.created_at
+		ORDER BY f.created_at DESC LIMIT 50`, userID, nowString())
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	items := []map[string]any{}
 	for rows.Next() {
-		var id, deviceID, createdAt, lastUsedAt string
-		if err := rows.Scan(&id, &deviceID, &createdAt, &lastUsedAt); err != nil {
+		var id, deviceID, browserFamily, browserVersion, createdAt, lastUsedAt string
+		if err := rows.Scan(&id, &deviceID, &browserFamily, &browserVersion, &createdAt, &lastUsedAt); err != nil {
 			return nil, err
 		}
-		items = append(items, map[string]any{"id": id, "deviceName": deviceID, "createdAt": createdAt, "lastUsedAt": lastUsedAt})
+		if browserFamily == "" {
+			browserFamily = "unknown"
+		}
+		items = append(items, map[string]any{
+			"id": id, "deviceId": deviceID, "deviceName": deviceID, "browserFamily": browserFamily,
+			"browserVersion": browserVersion, "createdAt": createdAt, "lastUsedAt": lastUsedAt,
+		})
 	}
 	return items, rows.Err()
+}
+
+func (a *App) adminV1UserBrowserStats(ctx context.Context, userID string) (int, []string, error) {
+	var count int
+	var families string
+	err := a.store.db.QueryRowContext(ctx, `SELECT COUNT(DISTINCT device_id),
+		COALESCE(GROUP_CONCAT(DISTINCT CASE WHEN browser_family='' THEN 'unknown' ELSE browser_family END),'')
+		FROM refresh_token_families WHERE user_id=? AND revoked_at='' AND expires_at>?`, userID, nowString()).Scan(&count, &families)
+	return count, adminV1BrowserFamilies(families), err
+}
+
+func adminV1BrowserFamilies(value string) []string {
+	seen := map[string]bool{}
+	families := []string{}
+	for _, family := range strings.Split(value, ",") {
+		family = strings.TrimSpace(family)
+		if family == "" || seen[family] {
+			continue
+		}
+		seen[family] = true
+		families = append(families, family)
+	}
+	sort.Strings(families)
+	return families
 }
 
 func (a *App) adminV1UserAttempts(ctx context.Context, userID string) ([]map[string]any, error) {

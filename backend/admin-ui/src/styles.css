@@ -812,6 +812,19 @@ label {
   color: var(--muted);
 }
 
+.browser-cell {
+  display: block;
+  min-width: 0;
+}
+
+.browser-cell small {
+  display: block;
+  max-width: 24rem;
+  margin-top: 2px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
 .avatar {
   display: inline-grid;
   width: 34px;
@@ -1229,6 +1242,15 @@ label {
 .backup-list p {
   margin: 3px 0 0;
   color: var(--muted);
+}
+
+.browser-session {
+  min-width: 0;
+}
+
+.browser-session strong,
+.browser-session p {
+  overflow-wrap: anywhere;
 }
 
 .event-list li {

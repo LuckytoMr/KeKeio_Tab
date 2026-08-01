@@ -141,7 +141,7 @@ func main() {
 	httpServer := server.NewHTTPServer(addr, handler)
 	serverErrors := make(chan error, 1)
 	go func() {
-		log.Printf("KeKeIO Tab backend listening on %s, db=%s", addr, dbPath)
+		log.Printf("kekeio backend listening on %s, db=%s", addr, dbPath)
 		serverErrors <- httpServer.ListenAndServe()
 	}()
 
@@ -305,7 +305,7 @@ func serveDevelopment(store *server.Store, config server.Config) error {
 	httpServer := server.NewHTTPServer(config.Addr, app.Routes())
 	serverErrors := make(chan error, 1)
 	go func() {
-		log.Printf("KeKeIO Tab local development server listening on %s", config.Addr)
+		log.Printf("kekeio local development server listening on %s", config.Addr)
 		serverErrors <- httpServer.ListenAndServe()
 	}()
 

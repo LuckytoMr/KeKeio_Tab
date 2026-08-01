@@ -42,10 +42,8 @@ import {
 } from "../shared/profile/mutations";
 import type { Profile, SearchEngine, Shortcut, ShortcutInput } from "../shared/profile/types";
 import { buildSearchUrl, getSearchEngineIcon } from "../shared/search/engines";
-import { normalizeShortcutUrl } from "../shared/url/normalize";
 import {
   buildShortcutIcon,
-  cacheShortcutIcon,
   getShortcutFallbackText,
   getShortcutIconImageUrl,
   type ShortcutIconMode
@@ -81,7 +79,7 @@ import {
   type PublicWorkerSession
 } from "../shared/sync/credentialVault";
 import { ScopedRequestGate, type ScopedRequestToken } from "../shared/sync/requestGate";
-import { backendHostPermissionOrigin, canonicalBackendBaseUrl } from "../shared/sync/syncApi";
+import { canonicalBackendBaseUrl } from "../shared/sync/syncApi";
 import { WritableSessionRequestGate } from "../shared/sync/writableSessionRequestGate";
 import { sendWorkerMessage } from "../shared/sync/workerProtocol";
 import { normalizeVerifiedRemoteStyles, type RemoteStylePackage } from "../shared/style/remoteStyles";
@@ -187,22 +185,6 @@ function getSearchUrl(profile: Profile, query: string) {
   const engine =
     profile.search.engines.find((item) => item.id === profile.search.selectedEngineId) ?? profile.search.engines[0];
   return buildSearchUrl(engine, query);
-}
-
-function canUseExtensionHostPermissions() {
-  return typeof chrome !== "undefined" && Boolean(chrome.runtime?.id);
-}
-
-async function ensureHostPermission(rawUrl: string) {
-  if (typeof chrome === "undefined" || !chrome.permissions?.contains || !chrome.permissions?.request) return true;
-  const origin = backendHostPermissionOrigin(rawUrl);
-  if (await chrome.permissions.contains({ origins: [origin] })) return true;
-  return chrome.permissions.request({ origins: [origin] });
-}
-
-async function hasHostPermission(rawUrl: string) {
-  if (typeof chrome === "undefined" || !chrome.runtime?.id || !chrome.permissions?.contains) return false;
-  return chrome.permissions.contains({ origins: [backendHostPermissionOrigin(rawUrl)] });
 }
 
 function buildWebPreviewRequestScope(auth: PublicWorkerSession) {
@@ -504,7 +486,6 @@ export function App() {
   const shortcutPressTimerRef = useRef<number | null>(null);
   const shortcutDragRef = useRef<ShortcutDragState | null>(null);
   const suppressShortcutClickRef = useRef(false);
-  const iconCacheAttemptedRef = useRef(new Set<string>());
   const prefetchedIconUrlsRef = useRef(new Set<string>());
   const rotationLastRunAtRef = useRef<number | null>(null);
 
@@ -621,46 +602,6 @@ export function App() {
   useEffect(() => {
     void refreshLocalWallpapers();
   }, []);
-
-  useEffect(() => {
-    if (!loaded || !canUseExtensionHostPermissions()) return;
-
-    let cancelled = false;
-    const faviconShortcuts = profile.shortcuts.filter(
-      (shortcut) => shortcut.icon.kind === "favicon" && !shortcut.deletedAt && !iconCacheAttemptedRef.current.has(shortcut.id)
-    );
-    if (!faviconShortcuts.length) return;
-
-    void (async () => {
-      for (const shortcut of faviconShortcuts) {
-        iconCacheAttemptedRef.current.add(shortcut.id);
-        const cachedIcon = await cacheShortcutIcon({ title: shortcut.title, url: shortcut.url }).catch(() => undefined);
-        if (cancelled || !cachedIcon) continue;
-
-        const current = profileRef.current;
-        if (!current.shortcuts.some((item) => item.id === shortcut.id && item.icon.kind === "favicon")) continue;
-
-        const timestamp = new Date().toISOString();
-        await persist({
-          ...current,
-          updatedAt: timestamp,
-          shortcuts: current.shortcuts.map((item) =>
-            item.id === shortcut.id
-              ? {
-                  ...item,
-                  icon: cachedIcon,
-                  updatedAt: timestamp
-                }
-              : item
-          )
-        });
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [loaded, profile.shortcuts]);
 
   useEffect(
     () => () => {
@@ -892,8 +833,6 @@ export function App() {
     setSyncAuthAction(mode);
     setSyncStatus(mode === "register" ? "正在注册..." : "正在登录...");
     try {
-      const baseUrl = fixedBackendUrl;
-      if (!(await ensureHostPermission(baseUrl))) throw new Error("需要允许访问 KeKeIO Tab 云端服务才能登录和同步");
       const email = backendEmail.trim();
 
       if (mode === "register") {
@@ -978,8 +917,6 @@ export function App() {
     setSyncBusy(true);
     setSyncStatus(kind === "resend-verification" ? "正在重新发送验证邮件…" : "正在申请密码重置邮件…");
     try {
-      const baseUrl = fixedBackendUrl;
-      if (!(await ensureHostPermission(baseUrl))) throw new Error("需要允许访问 KeKeIO Tab 云端服务才能发送账号邮件");
       const email = backendEmail.trim();
       if (!email) throw new Error("请先填写邮箱");
 
@@ -1319,7 +1256,6 @@ export function App() {
       // Release metadata is public and may be shared by accounts on this exact backend URL,
       // while a URL change always starts a distinct generation.
       releaseToken = releaseRequestGateRef.current.begin(baseUrl);
-      if (!(await hasHostPermission(baseUrl))) return;
       if (!releaseRequestGateRef.current.isCurrent(releaseToken)) return;
       const bootstrapData = await sendWorkerMessage<unknown>({ type: "catalog:get", kind: "bootstrap" });
       if (!releaseRequestGateRef.current.isCurrent(releaseToken)) return;
@@ -1858,19 +1794,12 @@ export function App() {
         iconText: shortcutForm.iconText,
         iconUrl: shortcutForm.iconUrl
       });
-      if (shortcutForm.iconMode === "auto" && canUseExtensionHostPermissions()) {
-        await ensureHostPermission(normalizeShortcutUrl(shortcutForm.url));
-      }
-      const cachedIcon =
-        shortcutForm.iconMode === "auto" && canUseExtensionHostPermissions()
-          ? await cacheShortcutIcon({ title: shortcutForm.title, url: shortcutForm.url }).catch(() => undefined)
-          : undefined;
       const input: ShortcutInput = {
         id: shortcutForm.id,
         groupId: shortcutForm.groupId,
         title: shortcutForm.title,
         url: shortcutForm.url,
-        icon: cachedIcon ?? builtIcon
+        icon: builtIcon
       };
       const next = upsertShortcut(profile, input);
       await persist(next);
@@ -2465,7 +2394,7 @@ export function App() {
         <section className="settings-panel" role="dialog" aria-modal="true" aria-label="设置">
           <header>
             <div>
-              <p className="kicker">KeKeIO Tab</p>
+              <p className="kicker">kekeio</p>
               <h2>设置</h2>
             </div>
             <button type="button" className="icon-button" aria-label="关闭" onClick={() => setSettingsOpen(false)}>
@@ -3191,7 +3120,7 @@ export function App() {
                 <div className="settings-section sync-panel">
                   <div className="sync-copy">
                     <h3>后端同步</h3>
-                    <p>注册或登录 KeKeIO Tab 云端后，当前配置会安全保存并在设备间同步。</p>
+                    <p>注册或登录 kekeio 云端后，当前配置会安全保存并在设备间同步。</p>
                     <p>只同步快捷方式、分组、搜索、壁纸选择和外观设置；本地上传图片、全网资源已缓存图片和网站图标缓存不会上传。</p>
                   </div>
 
@@ -3242,7 +3171,6 @@ export function App() {
                       <div className="sync-account" aria-live="polite">
                         <span>{backendAuth.readOnly ? "迁移只读" : "已登录"}</span>
                         <strong>{backendAuth.email}</strong>
-                        <code>{backendAuth.baseUrl}</code>
                       </div>
                     )}
                     {!backendAuth ? (

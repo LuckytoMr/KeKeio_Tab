@@ -86,8 +86,8 @@ export function AdminShell({
       <a class="skip-link" href="#main-content">跳到主要内容</a>
       <header class="mobile-header" inert={drawerMode && navOpen} aria-hidden={drawerMode && navOpen ? "true" : undefined}>
         <a class="brand-compact" href="/admin/overview" onClick={(event) => handleLink(event, "/admin/overview")}>
-          <span class="brand-mark" aria-hidden="true">KT</span>
-          <strong>KeKeIO Tab</strong>
+          <span class="brand-mark" aria-hidden="true">k</span>
+          <strong>kekeio</strong>
         </a>
         <button
           ref={navToggleRef}
@@ -105,9 +105,9 @@ export function AdminShell({
       {navOpen ? <button class="nav-scrim" type="button" tabIndex={-1} aria-hidden="true" aria-label="关闭导航" onClick={() => setNavOpen(false)} /> : null}
       <aside ref={sidebarRef} id="admin-sidebar" class="admin-sidebar" aria-label="后台导航抽屉" inert={drawerMode && !navOpen} aria-hidden={drawerMode && !navOpen ? "true" : undefined}>
         <div class="brand-block">
-          <span class="brand-mark" aria-hidden="true">KT</span>
+          <span class="brand-mark" aria-hidden="true">k</span>
           <div>
-            <strong>KeKeIO Tab</strong>
+            <strong>kekeio</strong>
             <span>运维工作台</span>
           </div>
           <button class="icon-button sidebar-close" type="button" aria-label="关闭导航" onClick={() => setNavOpen(false)}><X aria-hidden="true" /></button>

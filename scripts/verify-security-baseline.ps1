@@ -41,6 +41,26 @@ function Assert-Present {
     }
 }
 
+function Assert-ZeroWebsitePermissionsManifest {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][psobject]$Manifest
+    )
+
+    if ($null -ne $Manifest.PSObject.Properties["host_permissions"]) {
+        $failures.Add("$Name 不得声明 host_permissions")
+    }
+    if ($null -ne $Manifest.PSObject.Properties["optional_host_permissions"]) {
+        $failures.Add("$Name 不得声明 optional_host_permissions")
+    }
+    if (@($Manifest.permissions) -contains "declarativeNetRequestWithHostAccess") {
+        $failures.Add("$Name 不得声明 declarativeNetRequestWithHostAccess")
+    }
+    if ($null -ne $Manifest.PSObject.Properties["declarative_net_request"]) {
+        $failures.Add("$Name 不得声明 declarative_net_request 主机规则")
+    }
+}
+
 $backendSources = Get-ChildItem -LiteralPath (Join-Path $root "backend") -Recurse -File -Filter "*.go" |
     Where-Object { $_.Name -notlike "*_test.go" } |
     ForEach-Object FullName
@@ -61,12 +81,18 @@ $adminText = Read-WorkspaceText -Paths $adminSources
 
 $extensionAuthFormText = Get-Content -LiteralPath (Join-Path $root "extension\src\shared\sync\authForm.ts") -Raw
 $extensionAppText = Get-Content -LiteralPath (Join-Path $root "extension\src\newtab\App.tsx") -Raw
+$extensionProductionSources = Get-ChildItem -LiteralPath (Join-Path $root "extension\src") -Recurse -File -Include "*.ts", "*.tsx" |
+    Where-Object { $_.Name -notlike "*.test.ts" -and $_.Name -notlike "*.test.tsx" } |
+    ForEach-Object FullName
+$extensionProductionText = Read-WorkspaceText -Paths $extensionProductionSources
 $accountResetScriptText = Get-Content -LiteralPath (Join-Path $root "backend\internal\server\web\account\assets\reset.js") -Raw
 $accountResetPageText = Get-Content -LiteralPath (Join-Path $root "backend\internal\server\web\account\reset.html") -Raw
 
 $manifestPath = Join-Path $root "extension\public\manifest.json"
 $manifestText = Get-Content -LiteralPath $manifestPath -Raw
 $manifest = $manifestText | ConvertFrom-Json
+$builtExtensionRoot = Join-Path $root "extension\dist"
+$builtManifestPath = Join-Path $builtExtensionRoot "manifest.json"
 $routerDeployRoot = Join-Path $root "backend\deploy\router"
 $tunnelComposeText = Read-WorkspaceText -Paths @(
     (Join-Path $routerDeployRoot "compose.tunnel.yaml"),
@@ -112,6 +138,7 @@ Assert-Absent -Name "邮件重置页面不得恢复 8 位规则" -Text ($account
 Assert-Present -Name "项目规则必须锁定无安装码安装" -Text $productPolicyText -Pattern '首次安装和管理员重置不使用一次性安装码'
 Assert-Present -Name "项目规则必须锁定管理员密码 4 个 Unicode 字符" -Text $productPolicyText -Pattern '最低长度固定为 \*\*4 个 Unicode 字符\*\*'
 Assert-Present -Name "项目规则必须锁定插件用户密码 4 个 Unicode 字符" -Text $productPolicyText -Pattern '普通插件用户的注册密码与重置密码最低长度同样固定为 \*\*4 个 Unicode 字符\*\*'
+Assert-Present -Name "项目规则必须锁定扩展零网站权限" -Text $productPolicyText -Pattern '构建后的扩展 Manifest 必须保持零网站访问权限'
 Assert-Present -Name "后端必须发送 CSP" -Text $backendText -Pattern 'Content-Security-Policy'
 Assert-Present -Name "后端必须发送 nosniff" -Text $backendText -Pattern 'X-Content-Type-Options'
 Assert-Present -Name "同步写入必须执行版本前置条件" -Text $backendText -Pattern 'BaseVersion|baseVersion'
@@ -175,13 +202,23 @@ Assert-Absent -Name "CI 不得发布外层 SHA256 附件" -Text $publishWorkflow
 Assert-Absent -Name "CI 不得构建或推送 GHCR" -Text $publishWorkflowText -Pattern 'ghcr\.io|docker/login-action|packages:\s*write|Publish GHCR'
 
 Assert-Absent -Name "后台源码不得使用 innerHTML" -Text $adminText -Pattern '(?i)\.innerHTML\s*='
-$requiredHosts = @($manifest.host_permissions)
-if ($requiredHosts -contains "http://*/*") {
-    $failures.Add("扩展不得把所有 HTTP 主机列为必需权限")
+Assert-ZeroWebsitePermissionsManifest -Name "扩展源 Manifest" -Manifest $manifest
+if (!(Test-Path -LiteralPath $builtManifestPath)) {
+    $failures.Add("扩展构建产物缺少 dist/manifest.json，无法验证最终权限")
+} else {
+    $builtManifest = Get-Content -LiteralPath $builtManifestPath -Raw | ConvertFrom-Json
+    Assert-ZeroWebsitePermissionsManifest -Name "扩展构建后 Manifest" -Manifest $builtManifest
 }
-if ($requiredHosts -contains "https://*/*") {
-    $failures.Add("扩展不得把所有 HTTPS 主机列为必需权限；用户后端应按来源申请可选权限")
+$builtRuleFiles = if (Test-Path -LiteralPath (Join-Path $builtExtensionRoot "rules")) {
+    @(Get-ChildItem -LiteralPath (Join-Path $builtExtensionRoot "rules") -Recurse -File)
+} else {
+    @()
 }
+if ($builtRuleFiles.Count -gt 0) {
+    $failures.Add("扩展构建产物不得包含网站 DNR 规则文件")
+}
+Assert-Absent -Name "扩展不得动态申请或检查网站权限" -Text $extensionProductionText -Pattern 'chrome\.permissions\.(request|contains|getAll|remove)'
+Assert-Absent -Name "扩展不得恢复旧版任意资源代理消息" -Text $extensionProductionText -Pattern 'shortcut-icon:fetch-(page|image)|uhdpaper:fetch-(page|image)'
 
 if ($failures.Count -gt 0) {
     Write-Error ("安全基线检查失败：`n- " + ($failures -join "`n- "))

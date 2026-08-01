@@ -7,7 +7,7 @@ import (
 	"fmt"
 )
 
-const schemaVersion = 5
+const schemaVersion = 6
 
 func (s *Store) applySecurityMigrations(ctx context.Context) error {
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -62,6 +62,12 @@ func applySecurityMigrationsTx(ctx context.Context, tx *sql.Tx) error {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (5, ?)`, nowString()); err != nil {
+			return err
+		}
+		if err := addRefreshTokenFamilyBrowserColumns(ctx, tx); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (6, ?)`, nowString()); err != nil {
 			return err
 		}
 		return nil
@@ -136,6 +142,8 @@ func applySecurityMigrationsTx(ctx context.Context, tx *sql.Tx) error {
 			id TEXT PRIMARY KEY,
 			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			device_id TEXT NOT NULL,
+			browser_family TEXT NOT NULL DEFAULT '',
+			browser_version TEXT NOT NULL DEFAULT '',
 			scope TEXT NOT NULL DEFAULT 'full',
 			created_at TEXT NOT NULL,
 			expires_at TEXT NOT NULL,
@@ -313,6 +321,12 @@ func applySecurityMigrationsTx(ctx context.Context, tx *sql.Tx) error {
 	if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (version, applied_at) VALUES (5, ?)`, nowString()); err != nil {
 		return err
 	}
+	if err := addRefreshTokenFamilyBrowserColumns(ctx, tx); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (version, applied_at) VALUES (6, ?)`, nowString()); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -363,6 +377,21 @@ func addReleaseLifecycle(ctx context.Context, tx *sql.Tx) error {
 func addTokenScopeColumns(ctx context.Context, tx *sql.Tx) error {
 	for _, table := range []string{"refresh_token_families", "access_tokens"} {
 		if err := addColumnIfMissing(ctx, tx, table, "scope", `TEXT NOT NULL DEFAULT 'full'`); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func addRefreshTokenFamilyBrowserColumns(ctx context.Context, tx *sql.Tx) error {
+	for _, column := range []struct {
+		name       string
+		definition string
+	}{
+		{"browser_family", `TEXT NOT NULL DEFAULT ''`},
+		{"browser_version", `TEXT NOT NULL DEFAULT ''`},
+	} {
+		if err := addColumnIfMissing(ctx, tx, "refresh_token_families", column.name, column.definition); err != nil {
 			return err
 		}
 	}

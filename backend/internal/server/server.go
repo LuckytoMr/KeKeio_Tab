@@ -44,6 +44,7 @@ type Config struct {
 	DevelopmentMode         bool
 	SecretsPath             string
 	SMTPTester              func(context.Context, SMTPTestInput) error
+	UHDpaperTransport       http.RoundTripper
 }
 
 type App struct {
@@ -59,6 +60,9 @@ type App struct {
 	beforeMaintenanceRun func()
 	shutdownRequests     chan func() error
 	maintenanceMode      atomic.Bool
+	uhdpaperTransport    http.RoundTripper
+	uhdpaperLimiter      *uhdpaperFixedWindowLimiter
+	uhdpaperSlots        chan struct{}
 }
 
 func (a *App) runtimeAuthSettings() (registrationOpen bool, publicBaseURL string, mailer Mailer) {
@@ -142,12 +146,18 @@ func NewApp(store *Store, config Config) *App {
 	ipLimitConfig := config.AuthRateLimit
 	ipLimitConfig.Limit = config.AuthRateLimit.IPLimit
 	app := &App{
-		store:            store,
-		config:           config,
-		admin:            http.FileServer(http.FS(adminSubtree)),
-		authLimiter:      accountLimiter,
-		authIPLimiter:    newRateLimiter(ipLimitConfig),
-		shutdownRequests: make(chan func() error, 1),
+		store:             store,
+		config:            config,
+		admin:             http.FileServer(http.FS(adminSubtree)),
+		authLimiter:       accountLimiter,
+		authIPLimiter:     newRateLimiter(ipLimitConfig),
+		shutdownRequests:  make(chan func() error, 1),
+		uhdpaperTransport: config.UHDpaperTransport,
+		uhdpaperLimiter:   newUHDpaperFixedWindowLimiter(uhdpaperIPRateLimit, uhdpaperRateWindow, uhdpaperRateMaxBuckets),
+		uhdpaperSlots:     make(chan struct{}, uhdpaperGlobalConcurrency),
+	}
+	if app.uhdpaperTransport == nil {
+		app.uhdpaperTransport = newUHDpaperTransport()
 	}
 	if store != nil && store.db != nil {
 		var backupTable, activeRestores int
@@ -259,6 +269,8 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/catalog/wallpapers/official", a.requirePluginAccessV1(a.handleCatalogOfficialWallpapersV1))
 	mux.HandleFunc("GET /api/v1/catalog/wallpapers/web", a.requirePluginAccessV1(a.handleCatalogWebWallpapersV1))
 	mux.HandleFunc("GET /api/v1/catalog/styles", a.requirePluginAccessV1(a.handleCatalogStylesV1))
+	mux.HandleFunc("GET /api/v1/catalog/uhdpaper/page", a.requirePluginAccessV1(a.withUHDpaperRequestLimits(a.handleUHDpaperPageV1)))
+	mux.HandleFunc("GET /api/v1/catalog/uhdpaper/image", a.requirePluginAccessV1(a.withUHDpaperRequestLimits(a.handleUHDpaperImageV1)))
 	mux.HandleFunc("GET /admin", a.handleAdminIndex)
 	mux.HandleFunc("GET /admin/", a.handleAdminIndex)
 	mux.Handle("GET /admin/assets/", a.requireAdminNetworkHandler(http.StripPrefix("/admin/assets/", a.admin)))

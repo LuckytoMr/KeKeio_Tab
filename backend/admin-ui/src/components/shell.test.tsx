@@ -26,8 +26,8 @@ describe("AdminShell", () => {
       </AdminShell>
     );
 
-    expect(screen.getAllByText("KeKeIO Tab")).toHaveLength(2);
-    expect(screen.getAllByText("KT")).toHaveLength(2);
+    expect(screen.getAllByText("kekeio")).toHaveLength(2);
+    expect(screen.getAllByText("k")).toHaveLength(2);
     const sidebar = document.querySelector("#admin-sidebar");
     expect(sidebar).toHaveAttribute("inert");
     expect(sidebar).toHaveAttribute("aria-hidden", "true");

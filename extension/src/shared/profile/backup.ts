@@ -58,7 +58,7 @@ export function parseProfileBackup(text: string, localProfile: Profile) {
     return sharedProfileToLocalProfile(toSharedProfileV2(migrateProfile(legacyProfile)), localProfile);
   }
 
-  throw new Error("不是有效的 KeKeIO Tab 配置文件");
+  throw new Error("不是有效的 kekeio 配置文件");
 }
 
 export function buildProfileBackupFilename(profile: Profile, exportedAt = new Date()) {

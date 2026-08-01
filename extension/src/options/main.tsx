@@ -63,7 +63,7 @@ function OptionsApp() {
   return (
     <main className="options-page">
       <section className="options-shell">
-        <p className="kicker">KeKeIO Tab</p>
+        <p className="kicker">kekeio</p>
         <h1>选项</h1>
         <dl className="option-list">
           <div>

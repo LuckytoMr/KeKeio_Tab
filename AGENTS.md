@@ -1,4 +1,4 @@
-# KeKeIO Tab 固定产品约束
+# kekeio 固定产品约束
 
 以下约束由项目所有者明确决定。除非用户在当前任务中明确要求修改，否则任何实现、重构、安全加固或文档更新都不得改变这些行为。
 
@@ -25,6 +25,14 @@
 - Docker tar 必须同时包含 ARM64 的 `kekeio-tab:arm64` 与构建时最新的 `cloudflare/cloudflared:latest`。
 - 不得恢复 Actions Artifact、GHCR 发布、后端 ZIP、SimpleDocker 外层 ZIP、完整路由器归档或外层 `.sha256` 附件。
 - GitHub 自动生成的 Source code ZIP/TAR.GZ 不属于项目自定义资产。
+
+## 浏览器网站权限
+
+- 构建后的扩展 Manifest 必须保持零网站访问权限：不得声明 `host_permissions`、`optional_host_permissions`、`declarativeNetRequestWithHostAccess` 或带主机访问能力的 DNR 规则。
+- 不得通过 `chrome.permissions.request`、`chrome.permissions.contains` 或运行时动态授权恢复网站权限；Chrome 扩展详情页的“可读取和更改网站数据”列表必须为空。
+- `tab.kekeio.com` 与 GitHub 只能使用标准 CORS 请求，不得为方便绕过 CORS 而重新添加主机权限；Gist API Token 只允许发送给 `api.github.com`，截断文件的 `raw_url` 必须严格校验为 `https://gist.githubusercontent.com/.../full-pro-profile.json` 且不得携带 Token、Cookie 或 Referrer。
+- UHDpaper 必须通过已登录的 kekeio 后端受限代理访问；代理只能接受固定的 HTTPS 主机和路径，并必须保留 DNS、重定向、响应类型、体积与超时限制，禁止演变为任意 URL 代理。
+- 快捷方式图标不得自动申请或依赖目标网站权限；远程图标加载失败时使用文字图标回退，不得为图标缓存恢复任意站点抓取权限。
 
 ## 改动验证
 

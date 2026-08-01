@@ -21,7 +21,7 @@ const configs: Partial<Record<PageId, OperationConfig>> = {
 };
 
 export function getOperationConfig(page: PageId): OperationConfig {
-  return configs[page] || { title: "未知页面", eyebrow: "KeKeIO Tab", description: "这个页面不存在。", endpoint: "" };
+  return configs[page] || { title: "未知页面", eyebrow: "kekeio", description: "这个页面不存在。", endpoint: "" };
 }
 
 interface RecordList { items: Array<Record<string, unknown>>; nextCursor?: string }

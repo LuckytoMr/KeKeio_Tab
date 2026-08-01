@@ -1,24 +1,4 @@
-KeKeIO Tab 小米路由器 / SimpleDocker 直接启动
-
-固定配置：
-- 路由器 LAN：192.168.50.1/24
-- 后端端口：192.168.50.1:9009
-- 持久数据：/mnt/usb-24aeefbb/mi_docker/kekeio/data
-- 本地备份：/mnt/usb-24aeefbb/mi_docker/kekeio/backups
-- Tunnel 配置：当前目录已有的 cloudflared.env
-
-重要：
-- 保留现有 cloudflared.env，不需要再次输入 Token。
-- 更新时先在 SimpleDocker 中删除旧的 cloudflared-tab 和 kekeio-tab 容器；不要删除上述存储目录。
-- 严禁把 9009 转发到 WAN。
-
-一、加载 GitHub Release 构建好的 ARM64 镜像
-
-该文件同时包含 kekeio-tab 和构建时最新的 cloudflared，无需另外执行 docker pull。
-
 docker load -i kekeio-tab-docker-arm64.tar
-
-二、启动 KeKeIO Tab
 
 docker run -d \
   --name kekeio-tab \
@@ -33,8 +13,6 @@ docker run -d \
   -v /mnt/usb-24aeefbb/mi_docker/kekeio/backups:/backups \
   kekeio-tab:arm64
 
-三、启动随包提供的 cloudflared
-
 docker run -d \
   --name cloudflared-tab \
   --restart unless-stopped \
@@ -43,25 +21,6 @@ docker run -d \
   cloudflare/cloudflared:latest \
   tunnel --no-autoupdate run
 
-四、Cloudflare 保持以下配置
-
-主机名：tab.kekeio.com
-类型：HTTP
-URL：http://localhost:9009
-路径：留空
-HTTP Host Header：留空
-
-五、首次安装与检查
-
-局域网首次安装：http://192.168.50.1:9009/install
-安装完成后的后台：http://192.168.50.1:9009/admin
-
-从允许的局域网打开安装页后会自动建立安装会话，不需要一次性安装码。
-管理员密码最低固定为 4 个 Unicode 字符。
-
-检查容器：
-
-docker ps --filter name=kekeio-tab --filter name=cloudflared-tab
-docker logs --tail 100 cloudflared-tab
-
-说明：安装完成后再次打开 /install 返回 404 是正常安全行为，应改用 /admin。公网访问 /install、/admin 和 /api/admin/* 也必须返回 404。
+首次安装：http://192.168.50.1:9009/install
+安装后后台：http://192.168.50.1:9009/admin
+公网地址：https://tab.kekeio.com

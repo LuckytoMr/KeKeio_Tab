@@ -51,7 +51,7 @@ describe("LoginPage", () => {
 });
 
 describe("InstallWizard", () => {
-  it("starts a fresh install with the KeKeIO Tab public URL", async () => {
+  it("starts a fresh install with the kekeio public URL", async () => {
     const client = clientStub({
       get: vi.fn().mockResolvedValue({ state: "uninitialized" }),
       post: vi.fn().mockResolvedValue({ mode: "fresh_install", csrfToken: "csrf-install" })
@@ -219,8 +219,8 @@ describe("InstallWizard", () => {
     expect(await screen.findByRole("heading", { name: "环境检查" })).toBeInTheDocument();
     expect(client.post).toHaveBeenCalledWith("/install/api/v1/session", {});
     await waitFor(() => expect(screen.getByRole("heading", { name: "环境检查" })).toBeInTheDocument());
-    expect(screen.getByText("KeKeIO Tab")).toBeInTheDocument();
-    expect(screen.getByText("KT")).toBeInTheDocument();
+    expect(screen.getByText("kekeio")).toBeInTheDocument();
+    expect(screen.getByText("k")).toBeInTheDocument();
     expect(client.setCsrfToken).toHaveBeenCalledWith("csrf-install");
   });
 

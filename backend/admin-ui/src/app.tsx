@@ -229,6 +229,6 @@ function RouteView({ route, client, navigate, notify }: { route: AdminRoute; cli
     case "security":
     case "maintenance":
     case "system": return <SystemAreaPage client={client} route={route} notify={notify} />;
-    default: return <section class="not-found"><p class="section-label">404</p><h1>找不到这个后台页面</h1><p>该地址不属于 KeKeIO Tab 的 canonical routes。</p><button class="button primary" type="button" onClick={() => navigate("/admin/overview")}>返回概览</button></section>;
+    default: return <section class="not-found"><p class="section-label">404</p><h1>找不到这个后台页面</h1><p>该地址不属于 kekeio 的 canonical routes。</p><button class="button primary" type="button" onClick={() => navigate("/admin/overview")}>返回概览</button></section>;
   }
 }

@@ -29,24 +29,7 @@
     "service_worker": "service-worker.js",
     "type": "module"
   },
-  "permissions": ["storage", "alarms", "search", "declarativeNetRequestWithHostAccess"],
-  "host_permissions": [
-    "https://tab.kekeio.com/*",
-    "https://api.github.com/*",
-    "https://gist.githubusercontent.com/*",
-    "https://www.uhdpaper.com/*",
-    "https://*.uhdpaper.com/*"
-  ],
-  "optional_host_permissions": ["http://*/*", "https://*/*"],
-  "declarative_net_request": {
-    "rule_resources": [
-      {
-        "id": "uhdpaper_rules",
-        "enabled": true,
-        "path": "rules/uhdpaper.json"
-      }
-    ]
-  },
+  "permissions": ["storage", "alarms", "search"],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'; img-src 'self' data: blob: https:;"
   }

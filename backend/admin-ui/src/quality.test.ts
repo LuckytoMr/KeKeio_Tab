@@ -17,7 +17,7 @@ describe("production UI quality gates", () => {
     expect(html).toContain('<html lang="zh-CN">');
     expect(html).toContain('name="viewport"');
     expect(html).toContain('<div id="app"></div>');
-    expect(html).toContain("<title>KeKeIO Tab 运维工作台</title>");
+    expect(html).toContain("<title>kekeio 运维工作台</title>");
   });
 
   it("defines structural breakpoints, focus visibility and reduced motion", () => {

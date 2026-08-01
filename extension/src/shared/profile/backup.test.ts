@@ -80,9 +80,9 @@ describe("profile backup", () => {
     expect(imported.theme.iconSize).toBe("medium");
   });
 
-  it("rejects files that are not KeKeIO Tab profile backups", () => {
+  it("rejects files that are not kekeio profile backups", () => {
     const local = createDefaultProfile();
-    expect(() => parseProfileBackup("{}", local)).toThrow("不是有效的 KeKeIO Tab 配置文件");
+    expect(() => parseProfileBackup("{}", local)).toThrow("不是有效的 kekeio 配置文件");
     expect(() => parseProfileBackup("not-json", local)).toThrow("配置文件不是有效 JSON");
   });
 

@@ -61,4 +61,5 @@ if (-not $SkipBuild) {
 }
 
 Invoke-Checked "Cross-module security baseline" { & (Join-Path $PSScriptRoot "verify-security-baseline.ps1") }
+Invoke-Checked "Product presentation baseline" { & (Join-Path $PSScriptRoot "verify-product-presentation.ps1") }
 Write-Output "`n全部验证通过。"

@@ -88,6 +88,17 @@ func postV1(t *testing.T, handler http.Handler, path, body string) *httptest.Res
 	return response
 }
 
+func postV1WithUserAgent(t *testing.T, handler http.Handler, path, body, userAgent string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	req.RemoteAddr = "198.51.100.9:1234"
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", userAgent)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, req)
+	return response
+}
+
 func getV1Bearer(t *testing.T, handler http.Handler, path, token string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, path, nil)
@@ -133,6 +144,47 @@ func TestV1RegistrationRejectsFewerThanFourUnicodeCharacters(t *testing.T) {
 	}
 	if token := mailer.token("verify_email"); token != "" {
 		t.Fatalf("short password registration sent a verification token: %q", token)
+	}
+}
+
+func TestV1LoginStoresNormalizedBrowserMetadata(t *testing.T) {
+	handler, store, _ := newV1AuthApp(t)
+	user, err := store.CreateUser(t.Context(), "browser@example.com", "2231")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if _, err := store.db.Exec(`UPDATE users SET status='active',email_verified_at=?,updated_at=? WHERE id=?`, nowString(), nowString(), user.ID); err != nil {
+		t.Fatalf("activate user: %v", err)
+	}
+	edgeUA := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/127.0.0.0 Safari/537.36 Edg/127.0.2651.74"
+	login := postV1WithUserAgent(t, handler, "/api/v1/auth/login", `{"email":"browser@example.com","password":"2231","deviceId":"device-edge"}`, edgeUA)
+	if login.Code != http.StatusOK {
+		t.Fatalf("login = %d %s", login.Code, login.Body.String())
+	}
+	var family, version string
+	if err := store.db.QueryRow(`SELECT browser_family,browser_version FROM refresh_token_families WHERE user_id=? AND device_id='device-edge'`, user.ID).Scan(&family, &version); err != nil {
+		t.Fatalf("read browser metadata: %v", err)
+	}
+	if family != "edge" || version != "127.0.2651.74" {
+		t.Fatalf("stored browser metadata = %q/%q", family, version)
+	}
+	loginData := decodeV1Data(t, login)
+	refreshToken, _ := loginData["refreshToken"].(string)
+	if refreshToken == "" {
+		t.Fatalf("login refresh token missing: %#v", loginData)
+	}
+	if _, err := store.db.Exec(`UPDATE refresh_token_families SET browser_family='',browser_version='' WHERE user_id=? AND device_id='device-edge'`, user.ID); err != nil {
+		t.Fatalf("clear browser metadata: %v", err)
+	}
+	refresh := postV1WithUserAgent(t, handler, "/api/v1/auth/refresh", `{"refreshToken":"`+refreshToken+`","requestId":"browser-refresh"}`, edgeUA)
+	if refresh.Code != http.StatusOK {
+		t.Fatalf("refresh = %d %s", refresh.Code, refresh.Body.String())
+	}
+	if err := store.db.QueryRow(`SELECT browser_family,browser_version FROM refresh_token_families WHERE user_id=? AND device_id='device-edge'`, user.ID).Scan(&family, &version); err != nil {
+		t.Fatalf("read refreshed browser metadata: %v", err)
+	}
+	if family != "edge" || version != "127.0.2651.74" {
+		t.Fatalf("refreshed browser metadata = %q/%q", family, version)
 	}
 }
 

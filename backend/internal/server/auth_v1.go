@@ -241,6 +241,10 @@ func (s *Store) AuthenticatePlugin(ctx context.Context, email, password string) 
 }
 
 func (s *Store) CreateTokenFamily(ctx context.Context, userID, deviceID string) (TokenPair, error) {
+	return s.createTokenFamilyForBrowser(ctx, userID, deviceID, clientBrowser{Family: "unknown"})
+}
+
+func (s *Store) createTokenFamilyForBrowser(ctx context.Context, userID, deviceID string, browser clientBrowser) (TokenPair, error) {
 	deviceID = strings.TrimSpace(deviceID)
 	if deviceID == "" || len(deviceID) > 128 {
 		return TokenPair{}, fmt.Errorf("deviceId is required")
@@ -274,8 +278,8 @@ func (s *Store) CreateTokenFamily(ctx context.Context, userID, deviceID string) 
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO refresh_token_families (id, user_id, device_id, scope, created_at, expires_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, '')`,
-		familyID, userID, deviceID, scope, now.Format(time.RFC3339Nano), familyExpiry.Format(time.RFC3339Nano),
+		`INSERT INTO refresh_token_families (id, user_id, device_id, browser_family, browser_version, scope, created_at, expires_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '')`,
+		familyID, userID, deviceID, browser.Family, browser.Version, scope, now.Format(time.RFC3339Nano), familyExpiry.Format(time.RFC3339Nano),
 	); err != nil {
 		return TokenPair{}, err
 	}
@@ -290,6 +294,17 @@ func (s *Store) CreateTokenFamily(ctx context.Context, userID, deviceID string) 
 		return TokenPair{}, err
 	}
 	return tokenPair(userID, scope, access, refresh, accessExpiry, familyExpiry), nil
+}
+
+func (s *Store) updateTokenFamilyBrowserByRefreshToken(ctx context.Context, refreshToken string, browser clientBrowser) error {
+	if browser.Family == "" || browser.Family == "unknown" {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx, `UPDATE refresh_token_families
+		SET browser_family=?,browser_version=CASE WHEN ?='' THEN browser_version ELSE ? END
+		WHERE id=(SELECT family_id FROM refresh_tokens WHERE token_hash=?) AND revoked_at='' AND expires_at>?`,
+		browser.Family, browser.Version, browser.Version, tokenHash(refreshToken), nowString())
+	return err
 }
 
 func insertAccessToken(ctx context.Context, tx *sql.Tx, userID, familyID, deviceID, scope, access string, now time.Time) error {
@@ -728,7 +743,7 @@ func (a *App) handlePluginLoginV1(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	pair, err := a.store.CreateTokenFamily(r.Context(), user.ID, input.DeviceID)
+	pair, err := a.store.createTokenFamilyForBrowser(r.Context(), user.ID, input.DeviceID, identifyClientBrowser(r.UserAgent()))
 	if err != nil {
 		writeAPIError(w, http.StatusBadRequest, "INVALID_DEVICE", err.Error())
 		return
@@ -753,6 +768,7 @@ func (a *App) handlePluginRefreshV1(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusUnauthorized, "INVALID_REFRESH_TOKEN", "refresh token 无效或已过期")
 		return
 	}
+	_ = a.store.updateTokenFamilyBrowserByRefreshToken(r.Context(), input.RefreshToken, identifyClientBrowser(r.UserAgent()))
 	user, err := a.store.PluginUserByID(r.Context(), pair.UserID)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "TOKEN_RESPONSE_FAILED", "无法读取刷新后的账号")

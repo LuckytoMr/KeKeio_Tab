@@ -19,7 +19,7 @@ describe("operation route contracts", () => {
     expect(getOperationConfig("maintenance")).toMatchObject({ endpoint: "/api/admin/v1/system/maintenance/jobs" });
     expect(getOperationConfig("backups")).toMatchObject({ endpoint: "/api/admin/v1/system/backups" });
     expect(getOperationConfig("system")).toMatchObject({ endpoint: "/api/admin/v1/system/health" });
-    expect(getOperationConfig("not-found")).toMatchObject({ eyebrow: "KeKeIO Tab" });
+    expect(getOperationConfig("not-found")).toMatchObject({ eyebrow: "kekeio" });
   });
 });
 

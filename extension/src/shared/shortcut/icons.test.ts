@@ -1,15 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   buildShortcutIcon,
-  fetchFirstUsableIcon,
-  fetchShortcutIconThroughRuntime,
-  fetchShortcutPageHtmlThroughRuntime,
   getKnownShortcutIconCandidates,
   getShortcutIconImageUrl,
   getShortcutFaviconUrl,
-  getShortcutFallbackText,
-  resolveIconCandidatesFromPage,
-  resolveIconCandidatesFromHtml
+  getShortcutFallbackText
 } from "./icons";
 
 describe("shortcut icons", () => {
@@ -71,7 +66,7 @@ describe("shortcut icons", () => {
     });
   });
 
-  it("uses favicon icons as image sources while local cache is still warming", () => {
+  it("uses favicon icons directly as image sources", () => {
     expect(
       getShortcutIconImageUrl(
         {
@@ -84,101 +79,4 @@ describe("shortcut icons", () => {
     ).toBe("https://www.google.com/favicon.ico");
   });
 
-  it("resolves page icon candidates before falling back to favicon.ico", () => {
-    const html = `
-      <html>
-        <head>
-          <link rel="apple-touch-icon" href="/apple.png">
-          <link rel="shortcut icon" href="https://static.example.com/favicon.svg">
-          <link rel="icon" href="/favicon-32.png">
-        </head>
-      </html>
-    `;
-
-    expect(resolveIconCandidatesFromHtml("https://example.com/docs/page", html)).toEqual([
-      "https://static.example.com/favicon.svg",
-      "https://example.com/favicon-32.png",
-      "https://example.com/apple.png",
-      "https://example.com/favicon.ico"
-    ]);
-  });
-
-  it("prefers vector and large declared icon sizes over tiny favicon links", () => {
-    const html = `
-      <link rel="icon" sizes="16x16" href="/favicon-16.png">
-      <link rel="icon" sizes="192x192" href="/icon-192.png">
-      <link rel="apple-touch-icon" sizes="180x180" href="/apple.png">
-      <link rel="shortcut icon" type="image/svg+xml" href="/icon.svg">
-    `;
-
-    expect(resolveIconCandidatesFromHtml("https://example.com/app", html)).toEqual([
-      "https://example.com/icon.svg",
-      "https://example.com/icon-192.png",
-      "https://example.com/apple.png",
-      "https://example.com/favicon-16.png",
-      "https://example.com/favicon.ico"
-    ]);
-  });
-
-  it("resolves icon candidates from a fetched page", async () => {
-    const candidates = await resolveIconCandidatesFromPage("example.com", async () => `
-      <link rel="icon" href="/brand.png">
-    `);
-
-    expect(candidates[0]).toBe("https://example.com/brand.png");
-  });
-
-  it("uses known stable icon candidates before blocked service favicon redirects", async () => {
-    const candidates = await resolveIconCandidatesFromPage("https://mail.google.com", async () => "<html></html>");
-
-    expect(candidates[0]).toBe("https://ssl.gstatic.com/ui/v1/icons/mail/rfr/gmail.ico");
-    expect(candidates).toContain("https://mail.google.com/favicon.ico");
-  });
-
-  it("uses the first successful image response when fetching icon candidates", async () => {
-    const blob = new Blob(["icon"], { type: "image/png" });
-    const responses = [
-      new Response("", { status: 404 }),
-      new Response(blob, { status: 200, headers: { "content-type": "image/png" } })
-    ];
-    const fetched: string[] = [];
-
-    const result = await fetchFirstUsableIcon(["https://example.com/a.ico", "https://example.com/b.png"], async (url) => {
-      fetched.push(url);
-      return responses.shift()!;
-    });
-
-    expect(fetched).toEqual(["https://example.com/a.ico", "https://example.com/b.png"]);
-    expect(result?.blob.type).toBe("image/png");
-    expect(result?.sourceUrl).toBe("https://example.com/b.png");
-  });
-
-  it("can fetch shortcut page HTML through the extension runtime", async () => {
-    const messages: unknown[] = [];
-    const html = await fetchShortcutPageHtmlThroughRuntime("https://example.com", {
-      sendMessage: async (message: unknown) => {
-        messages.push(message);
-        return { ok: true, data: { html: "<link rel=\"icon\" href=\"/icon.png\">" } };
-      }
-    });
-
-    expect(messages).toEqual([{ type: "shortcut-icon:fetch-page", url: "https://example.com" }]);
-    expect(html).toContain("rel=\"icon\"");
-  });
-
-  it("can fetch shortcut icon images through the extension runtime", async () => {
-    const response = await fetchShortcutIconThroughRuntime("https://example.com/icon.png", {
-      sendMessage: async () => ({
-        ok: true,
-        data: {
-          mimeType: "image/png",
-          dataUrl: "data:image/png;base64,aWNvbg=="
-        }
-      })
-    });
-
-    expect(response.ok).toBe(true);
-    expect(response.headers.get("content-type")).toBe("image/png");
-    expect(await response.text()).toBe("icon");
-  });
 });

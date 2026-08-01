@@ -54,6 +54,19 @@ describe("worker protocol", () => {
     expect(getCatalog).toHaveBeenCalledWith("bootstrap", undefined, "https://tab.kekeio.com");
   });
 
+  it.each(["uhdpaper-page", "uhdpaper-image"] as const)("routes %s through the authenticated catalog runtime", async (kind) => {
+    const getCatalog = vi.fn(async () => ({ ok: true }));
+    const runtime = { getCatalog } as unknown as WorkerRuntimePort;
+    const query = kind === "uhdpaper-page"
+      ? "https://www.uhdpaper.com/?page=2"
+      : "https://img.uhdpaper.com/wallpaper/space.jpg";
+
+    await expect(dispatchWorkerMessage(runtime, { type: "catalog:get", kind, query }))
+      .resolves.toEqual({ ok: true });
+
+    expect(getCatalog).toHaveBeenCalledWith(kind, query);
+  });
+
   it("routes account recovery requests without exposing them to the new-tab page fetch context", async () => {
     const resendVerification = vi.fn(async () => ({ accepted: true }));
     const forgotPassword = vi.fn(async () => ({ accepted: true }));

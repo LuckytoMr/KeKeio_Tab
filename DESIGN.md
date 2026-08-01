@@ -2,7 +2,7 @@
 
 ## System
 
-KeKeIO Tab is a productivity tool UI. It should feel quiet and precise, with dense but readable controls, restrained motion, and strong contrast.
+kekeio is a productivity tool UI. It should feel quiet and precise, with dense but readable controls, restrained motion, and strong contrast.
 
 ## Color Strategy
 

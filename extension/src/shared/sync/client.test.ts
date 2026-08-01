@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { createDefaultProfile } from "../profile/defaults";
-import { githubProfileFilename, githubTokenCreateUrl, saveProfileToGitHubGist } from "./client";
+import { githubProfileFilename, githubTokenCreateUrl, loadProfileFromGitHubGist, saveProfileToGitHubGist } from "./client";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -11,7 +11,7 @@ describe("githubTokenCreateUrl", () => {
     expect(url.origin).toBe("https://github.com");
     expect(url.pathname).toBe("/settings/tokens/new");
     expect(url.searchParams.get("scopes")).toBe("gist");
-    expect(url.searchParams.get("description")).toBe("KeKeIO Tab");
+    expect(url.searchParams.get("description")).toBe("kekeio");
   });
 });
 
@@ -47,8 +47,9 @@ describe("versioned GitHub Gist backups", () => {
       "profile",
       "schemaVersion"
     ]);
-    expect(description).toBe("KeKeIO Tab profile backup");
+    expect(description).toBe("kekeio profile backup");
     expect(result.canonicalProfileSha256).toBe(envelope.canonicalProfileSha256);
+    expect(fetchMock.mock.calls.every(([, init]) => init?.credentials === "omit" && init.redirect === "error")).toBe(true);
   });
 
   test("refuses to overwrite a Gist that changed since the last observed hash", async () => {
@@ -67,6 +68,63 @@ describe("versioned GitHub Gist backups", () => {
       expectedRemoteSha256: "stale-hash",
       profile: createDefaultProfile()
     })).rejects.toMatchObject({ code: "GIST_REMOTE_CHANGED" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("loads the exact truncated file from a validated raw URL without forwarding the token", async () => {
+    const { createGistBackupEnvelope } = await import("./gistBackup");
+    const envelope = await createGistBackupEnvelope(createDefaultProfile());
+    const rawUrl = `https://gist.githubusercontent.com/owner/gist/raw/revision/${githubProfileFilename}`;
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+      if (url === rawUrl) {
+        return new Response(JSON.stringify(envelope), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify({
+        files: {
+          "unrelated.txt": {
+            content: "this file must never be parsed"
+          },
+          [githubProfileFilename]: {
+            content: "{\"truncated\":true}",
+            truncated: true,
+            raw_url: rawUrl
+          }
+        }
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(loadProfileFromGitHubGist({ token: " token ", gistId: "gist/one" }))
+      .resolves.toMatchObject({ canonicalProfileSha256: envelope.canonicalProfileSha256 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "https://api.github.com/gists/gist%2Fone",
+      rawUrl
+    ]);
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({
+      credentials: "omit",
+      redirect: "error",
+      referrerPolicy: "no-referrer"
+    });
+    expect(fetchMock.mock.calls[1][1]?.headers).toBeUndefined();
+  });
+
+  test("rejects untrusted raw URLs before making a cross-origin request", async () => {
+    const fetchMock = vi.fn(async () => {
+      return new Response(JSON.stringify({
+        files: {
+          [githubProfileFilename]: {
+            truncated: true,
+            raw_url: `https://evil.example/raw/${githubProfileFilename}`
+          }
+        }
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(loadProfileFromGitHubGist({ token: "token", gistId: "gist:one" }))
+      .rejects.toThrow("GitHub Gist 返回了不受信任的原始文件地址");
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

@@ -136,10 +136,6 @@ function isPrivateHTTPHost(rawHostname: string) {
   return octets[0] === 10 || octets[0] === 127 || (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) || (octets[0] === 192 && octets[1] === 168);
 }
 
-export function backendHostPermissionOrigin(raw: string) {
-  return `${new URL(canonicalBackendBaseUrl(raw)).origin}/*`;
-}
-
 function retryAfterMs(value: string | null) {
   if (!value) return undefined;
   const seconds = Number(value);
@@ -298,5 +294,13 @@ export class SyncApiClient {
 
   listStyles(accessToken: string) {
     return this.request("/api/v1/catalog/styles", { accessToken });
+  }
+
+  fetchUhdpaperPage(accessToken: string, url: string) {
+    return this.request(`/api/v1/catalog/uhdpaper/page?url=${encodeURIComponent(url)}`, { accessToken });
+  }
+
+  fetchUhdpaperImage(accessToken: string, url: string) {
+    return this.request(`/api/v1/catalog/uhdpaper/image?url=${encodeURIComponent(url)}`, { accessToken });
   }
 }

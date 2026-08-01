@@ -396,7 +396,7 @@ export function InstallWizard({ client, onInstalled }: { client: ApiClient; onIn
   return (
     <div class="install-shell">
       <aside class="install-progress" aria-label="安装步骤">
-        <div class="brand-block"><span class="brand-mark" aria-hidden="true">KT</span><div><strong>KeKeIO Tab</strong><span>{session.mode === "admin_reset" ? "管理员重置" : "首次安装"}</span></div></div>
+        <div class="brand-block"><span class="brand-mark" aria-hidden="true">k</span><div><strong>kekeio</strong><span>{session.mode === "admin_reset" ? "管理员重置" : "首次安装"}</span></div></div>
         <ol>{steps.map((label, index) => <li key={label} aria-current={index === stepIndex ? "step" : undefined} data-complete={index < stepIndex ? "true" : "false"}><span>{index < stepIndex ? <Check size={14} aria-hidden="true" /> : index + 1}</span>{label}</li>)}</ol>
         <p class="session-note">会话最长 2 小时。{session.expiresAt ? `本次会话将在 ${formatDate(session.expiresAt)} 前有效。` : "即将过期时页面会提示续期。"}</p>
       </aside>

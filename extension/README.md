@@ -1,6 +1,6 @@
-# KeKeIO Tab
+# kekeio
 
-KeKeIO Tab is a local-first new tab extension with grouped shortcuts, wallpapers, portable configuration backups, and cloud sync.
+kekeio is a local-first new tab extension with grouped shortcuts, wallpapers, portable configuration backups, and cloud sync.
 
 ## Development
 
@@ -39,7 +39,7 @@ Load it in Chrome or Edge:
 
 - Manifest V3 new tab override.
 - New tab UI with search, groups, shortcut add/edit/delete.
-- KeKeIO Tab search engine list with Baidu first and Google second.
+- kekeio search engine list with Baidu first and Google second.
 - IndexedDB is the authoritative local-first profile store; existing `chrome.storage.local` or development localStorage profiles are imported once as legacy data.
 - Local wallpaper upload in IndexedDB.
 - Wallpaper workspace with four sources: official picks, web resources, local upload, and selected pool.

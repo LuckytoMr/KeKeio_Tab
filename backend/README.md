@@ -1,6 +1,6 @@
-# KeKeIO Tab Backend
+# kekeio Backend
 
-KeKeIO Tab 的单机自托管后端，提供邮箱验证账号、`SharedProfile v2` 配置同步、资源目录和局域网运维工作台。SQLite 是唯一数据源；本地图片、图标 Blob、第三方凭据和设备运行状态不会上传。
+kekeio 的单机自托管后端，提供邮箱验证账号、`SharedProfile v2` 配置同步、资源目录和局域网运维工作台。SQLite 是唯一数据源；本地图片、图标 Blob、第三方凭据和设备运行状态不会上传。
 
 ## Docker 正式部署
 

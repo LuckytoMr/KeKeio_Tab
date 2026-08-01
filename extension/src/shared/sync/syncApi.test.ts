@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDefaultProfile } from "../profile/defaults";
 import { toSharedProfileV2 } from "../profile/sharedProfile";
-import { ApiError, backendHostPermissionOrigin, canonicalBackendBaseUrl, SyncApiClient } from "./syncApi";
+import { ApiError, canonicalBackendBaseUrl, SyncApiClient } from "./syncApi";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -9,11 +9,9 @@ afterEach(() => {
 });
 
 describe("SyncApiClient", () => {
-  it("canonicalizes a public backend URL and derives only its exact host permission", () => {
+  it("canonicalizes a public backend URL", () => {
     expect(canonicalBackendBaseUrl(" HTTPS://Sync.Example.Test:8443/root///?token=secret#fragment "))
       .toBe("https://sync.example.test:8443/root");
-    expect(backendHostPermissionOrigin("https://sync.example.test:8443/root"))
-      .toBe("https://sync.example.test:8443/*");
     expect(() => canonicalBackendBaseUrl("http://sync.example.test"))
       .toThrow(/HTTPS/);
   });
@@ -326,5 +324,30 @@ describe("SyncApiClient", () => {
       ["https://sync.example.test/api/v1/auth/resend-verification", { email: "pending@example.test" }],
       ["https://sync.example.test/api/v1/auth/forgot-password", { email: "one@example.test" }]
     ]);
+  });
+
+  it("routes UHDpaper page and image requests through authenticated backend endpoints", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ data: { ok: true } }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new SyncApiClient("https://sync.example.test/root");
+    const pageUrl = "https://www.uhdpaper.com/?page=2&search=space";
+    const imageUrl = "https://img.uhdpaper.com/wallpaper/space.jpg?dl";
+
+    await client.fetchUhdpaperPage("access-token", pageUrl);
+    await client.fetchUhdpaperImage("access-token", imageUrl);
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      `https://sync.example.test/root/api/v1/catalog/uhdpaper/page?url=${encodeURIComponent(pageUrl)}`,
+      `https://sync.example.test/root/api/v1/catalog/uhdpaper/image?url=${encodeURIComponent(imageUrl)}`
+    ]);
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({
+      headers: expect.objectContaining({ Authorization: "Bearer access-token" })
+    });
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({
+      headers: expect.objectContaining({ Authorization: "Bearer access-token" })
+    });
   });
 });
