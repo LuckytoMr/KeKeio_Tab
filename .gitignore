@@ -18,6 +18,7 @@ install-code
 cloudflare-tunnel-token
 cloudflared-token
 backend/deploy/router/secrets/
+backend/deploy/router/runtime/
 
 # Local environment files and private key material
 .env

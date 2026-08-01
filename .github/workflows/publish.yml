@@ -75,6 +75,11 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
           govulncheck ./...
 
+      - name: Verify router one-click installer
+        run: |
+          sh -n backend/deploy/router/install.sh
+          sh backend/deploy/router/install.sh --self-test
+
   package:
     name: Build and publish release archives
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
@@ -172,24 +177,35 @@ jobs:
           test "$(docker image inspect "${CADDY_IMAGE}" --format '{{.Os}}/{{.Architecture}}')" = "linux/arm64"
           test "$(docker image inspect "${CLOUDFLARED_IMAGE}" --format '{{.Os}}/{{.Architecture}}')" = "linux/arm64"
           docker save \
-            --output "${RUNNER_TEMP}/kekeio-tab-router-arm64.tar" \
+            --output "${RUNNER_TEMP}/kekeio-tab-router-images-arm64.tar" \
             kekeio-tab:arm64 \
             "${CADDY_IMAGE}" \
             "${CLOUDFLARED_IMAGE}"
-          test -s "${RUNNER_TEMP}/kekeio-tab-router-arm64.tar"
+          test -s "${RUNNER_TEMP}/kekeio-tab-router-images-arm64.tar"
 
       - name: Create release archives
         run: |
           mkdir -p release
           mv "${RUNNER_TEMP}/kekeio-tab-docker-arm64.tar" release/kekeio-tab-docker-arm64.tar
-          mv "${RUNNER_TEMP}/kekeio-tab-router-arm64.tar" release/kekeio-tab-router-arm64.tar
+          bundle_dir="release/kekeio-tab-router-arm64"
+          mkdir -p "${bundle_dir}"
+          mv "${RUNNER_TEMP}/kekeio-tab-router-images-arm64.tar" "${bundle_dir}/images.tar"
+          cp backend/deploy/router/install.sh "${bundle_dir}/install.sh"
+          chmod 755 "${bundle_dir}/install.sh"
+          cp backend/deploy/router/Caddyfile.tunnel "${bundle_dir}/Caddyfile.tunnel"
+          cp backend/deploy/router/README.md "${bundle_dir}/README.md"
+          (cd "${bundle_dir}" && sha256sum images.tar > images.tar.sha256)
+          tar -C release -czf release/kekeio-tab-router-arm64.tar.gz kekeio-tab-router-arm64
+          test -s release/kekeio-tab-router-arm64.tar.gz
+          tar -tzf release/kekeio-tab-router-arm64.tar.gz | grep -Fx 'kekeio-tab-router-arm64/install.sh'
+          rm -rf "${bundle_dir}"
           cd backend
           zip -qr ../release/kekeio-tab-backend.zip cmd internal admin-ui bin deploy Dockerfile .dockerignore .env.example go.mod go.sum README.md \
             -x 'admin-ui/node_modules/*' 'admin-ui/dist/*' 'admin-ui/coverage/*'
           cd ../extension
           zip -qr ../release/kekeio-tab-extension.zip dist
           cd ../release
-          for artifact in *.zip *.tar; do
+          for artifact in *.zip *.tar *.tar.gz; do
             sha256sum "${artifact}" > "${artifact}.sha256"
           done
 
@@ -199,7 +215,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          assets=(release/*.zip release/*.tar release/*.sha256)
+          assets=(release/*.zip release/*.tar release/*.tar.gz release/*.sha256)
           if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
             gh release upload "${GITHUB_REF_NAME}" "${assets[@]}" --clobber
           else

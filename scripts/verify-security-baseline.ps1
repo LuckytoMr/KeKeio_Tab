@@ -69,6 +69,7 @@ $tunnelComposeText = Read-WorkspaceText -Paths @(
 )
 $tunnelCaddyText = Get-Content -LiteralPath (Join-Path $routerDeployRoot "Caddyfile.tunnel") -Raw
 $tunnelPublicCaddyText = ($tunnelCaddyText -split '# 管理入口只监听', 2)[0]
+$routerInstallerText = Get-Content -LiteralPath (Join-Path $routerDeployRoot "install.sh") -Raw
 
 Assert-Absent -Name "生产后端不得内置固定管理员口令" -Text $backendText -Pattern '(?i)fixedAdminPassword|ensureFixedAdmin|2231'
 Assert-Present -Name "本地 dev 命令必须显式标注固定测试口令" -Text $localDevCommandText -Pattern 'const\s+localDevelopmentPassword\s*=\s*"2231"'
@@ -93,6 +94,15 @@ Assert-Present -Name "Tunnel 必须使用独立的 Caddy 公网监听器" -Text 
 Assert-Present -Name "Tunnel 公网监听器必须校验随机源站 Host" -Text $tunnelPublicCaddyText -Pattern 'host\s+\{\$KEKEIO_TUNNEL_ORIGIN_HOST\}'
 Assert-Present -Name "Tunnel 公网监听器必须有默认拒绝" -Text $tunnelPublicCaddyText -Pattern 'respond\s+404'
 Assert-Absent -Name "Tunnel 公网监听器不得包含管理路由" -Text $tunnelPublicCaddyText -Pattern '/admin|/install|/api/admin/'
+Assert-Absent -Name "一键安装器不得共享容器网络命名空间" -Text $routerInstallerText -Pattern '(?i)--network\s+container:'
+Assert-Absent -Name "一键安装器不得通过环境变量传递 Tunnel Token" -Text $routerInstallerText -Pattern '(?i)(-e|--env)\s+[^\r\n]*(TUNNEL_TOKEN|CLOUDFLARE_TUNNEL_TOKEN)'
+Assert-Absent -Name "一键安装器不得挂载 Docker socket" -Text $routerInstallerText -Pattern '/var/run/docker\.sock'
+Assert-Absent -Name "一键安装器不得在线拉取浮动镜像" -Text $routerInstallerText -Pattern '(?i)docker\s+pull|cloudflared:latest'
+Assert-Present -Name "一键安装器必须从离线包加载镜像" -Text $routerInstallerText -Pattern 'docker\s+load\s+-i'
+Assert-Present -Name "一键安装器必须从只读文件传递 Tunnel Token" -Text $routerInstallerText -Pattern 'cloudflare-tunnel-token:ro'
+Assert-Present -Name "一键安装器必须让 cloudflared 使用默认 bridge" -Text $routerInstallerText -Pattern '--network\s+bridge'
+Assert-Present -Name "一键安装器必须通过 Caddy 固定地址收窄可信代理" -Text $routerInstallerText -Pattern 'FULLPRO_TRUSTED_PROXIES=\$\{CADDY_IP\}/32'
+Assert-Present -Name "一键安装器必须绑定真实 LAN 管理地址" -Text $routerInstallerText -Pattern '\$\{LAN_IP\}:8443:443/tcp'
 
 Assert-Absent -Name "后台源码不得使用 innerHTML" -Text $adminText -Pattern '(?i)\.innerHTML\s*='
 $requiredHosts = @($manifest.host_permissions)

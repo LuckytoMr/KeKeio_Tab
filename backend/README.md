@@ -6,12 +6,23 @@ KeKeIO Tab 的单机自托管后端，提供邮箱验证账号、`SharedProfile 
 
 正式后端统一监听容器端口 `9009`，并由 Caddy 提供严格路径白名单。小米路由器推荐使用 Cloudflare Tunnel：公网只进入 Caddy 的公网专用监听器，安装与后台使用独立的 LAN HTTPS 入口，后端端口不发布。
 
+推荐从 GitHub Release 下载一键包，上传后执行：
+
+```sh
+tar -xzf kekeio-tab-router-arm64.tar.gz && sh kekeio-tab-router-arm64/install.sh
+```
+
+脚本直接调用 Docker，不要求路由器安装 Compose；它会自动加载三张 ARM64 镜像、检测网络、生成非敏感配置并启动容器。Cloudflare Tunnel Token 只在首次运行时无回显输入并保存到本地受限文件。
+
 - [完整路由器部署指南](deploy/router/README.md)
 - [Docker Compose](deploy/router/compose.yaml)
 - [标准 Tunnel 覆盖](deploy/router/compose.tunnel.yaml)
 - [SimpleDocker Tunnel 覆盖](deploy/router/compose.tunnel-simpledocker.yaml)
 - [Tunnel 专用 Caddyfile](deploy/router/Caddyfile.tunnel)
 - [环境变量样例](deploy/router/router.env.example)
+- [一键安装器](deploy/router/install.sh)
+
+以下命令只用于高级手工检查；一键安装不依赖 Compose：
 
 ```sh
 # Git 仓库中：cd backend/deploy/router
@@ -22,18 +33,17 @@ docker compose -p kekeio-tab --env-file .env \
   -f compose.yaml -f compose.tunnel-simpledocker.yaml config
 ```
 
-### 离线 ARM64 Docker 镜像
+### 一键 ARM64 Docker 包
 
-从 `v*` GitHub Release 下载完整的路由器包并先校验：
+从 `v*` GitHub Release 下载完整路由器包并执行：
 
 ```sh
-sha256sum -c kekeio-tab-router-arm64.tar.sha256
-docker load -i kekeio-tab-router-arm64.tar
+tar -xzf kekeio-tab-router-arm64.tar.gz && sh kekeio-tab-router-arm64/install.sh
 ```
 
-完整 tar 包含 `kekeio-tab:arm64`、`caddy:2.11.4-alpine` 和 `cloudflare/cloudflared:2026.7.3`。仅含应用的兼容包 `kekeio-tab-docker-arm64.tar` 仍可用 `docker load` 导入，但完全离线时必须另外准备 Caddy 与 cloudflared。
+完整包包含 `kekeio-tab:arm64`、`caddy:2.11.4-alpine`、`cloudflare/cloudflared:2026.7.3`、一键安装器及 Caddy 配置。需要校验外层下载文件时可再下载同名 `.sha256`；安装器始终会校验包内镜像归档。仅含应用的兼容包 `kekeio-tab-docker-arm64.tar` 仍可用 `docker load` 导入，但不提供完整 Tunnel 与管理入口。
 
-在 `deploy/router/.env` 中设置 `KEKEIO_IMAGE=kekeio-tab:arm64`，保持 `KEKEIO_TRUSTED_PROXIES=172.30.88.2/32`，并填写真实 LAN 地址、最小管理 CIDR、Docker bridge gateway 和受保护的 Token 文件路径。小米/SimpleDocker 启动命令为：
+只有选择高级手工模式时，才需要在 `deploy/router/.env` 中设置镜像、LAN、CIDR、Docker bridge gateway 和 Token 文件路径，再执行：
 
 ```sh
 docker compose -p kekeio-tab --env-file .env \

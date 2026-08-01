@@ -17,6 +17,38 @@
 
 公网入口只允许 `/`、`/api/v1/*`、账号验证/重置资源和健康端点。`/admin*`、`/install*`、`/api/admin/*` 永远不会进入 Tunnel。后端 `9009` 不发布到 WAN。
 
+## 推荐：一个包、一条命令
+
+GitHub Release 会生成：
+
+```text
+kekeio-tab-router-arm64.tar.gz
+kekeio-tab-router-arm64.tar.gz.sha256
+```
+
+默认只需把 `kekeio-tab-router-arm64.tar.gz` 上传到路由器，在 SimpleDocker 的 Docker 管理终端运行：
+
+```sh
+tar -xzf kekeio-tab-router-arm64.tar.gz && sh kekeio-tab-router-arm64/install.sh
+```
+
+若要额外校验下载过程，再上传同名 `.sha256` 并先执行 `sha256sum -c kekeio-tab-router-arm64.tar.gz.sha256`。即使省略外层校验，安装器仍会强制校验包内的 `images.tar`。
+
+一键安装器会自动完成：
+
+1. 校验并执行 `docker load`，加载应用、Caddy 和固定版本 cloudflared 三张 ARM64 镜像。
+2. 自动识别 `br-lan`/`br0` 的 LAN 地址和 Docker 默认 bridge 网关。
+3. 创建数据、备份、Token、Caddy 卷和隔离网络。
+4. 生成随机源站 Host，以无回显方式读取一次新 Tunnel Token。
+5. 直接通过 Docker CLI 创建并健康检查三个容器，不要求路由器安装 `docker compose`。
+6. 输出 Cloudflare Published application 需要填写的 Service URL、HTTP Host Header，以及局域网安装地址。
+
+安装器不能代替你登录 Cloudflare 账户创建 Tunnel，也不会要求或保存 Cloudflare API Token。创建 Tunnel、取得新 Tunnel Token并在控制台保存 Published application 是唯一保留的账户操作。
+
+更新时上传新包并再次运行同一命令即可；安装器会复用数据、备份、Caddy CA、源站 Host 和本地 Token 文件，只替换它自己管理的容器。如果同名容器来自早期 Compose 或手工命令，安装器会识别 `kekeio-tab` Compose 项目并迁移；其他未知同名容器默认拒绝删除，只有明确确认后才使用 `sh kekeio-tab-router-arm64/install.sh --replace`。
+
+下面的内容保留给排错、审计和不使用一键安装器的高级手工部署。
+
 ## 必须先处理的安全事项
 
 1. 用户消息中出现过的 Cloudflare Tunnel Token 已经泄露。先在 Cloudflare 控制台轮换 Token，并强制断开旧连接；若 Tunnel 尚未投入生产，直接删除后重新创建最省事。
@@ -38,8 +70,11 @@
 - `compose.tunnel-simpledocker.yaml`：小米/SimpleDocker 推荐兼容方案；`cloudflared` 使用内置 `bridge` 出网。
 - `Caddyfile.tunnel`：Tunnel 公网白名单与 LAN 管理入口严格分离。
 - `router.env.example`：不含凭据的环境样例。
+- `install.sh`：不依赖 Compose 的一键安装与更新入口。
 
-## 1. 检查运行环境
+## 高级手工部署
+
+### 1. 检查运行环境
 
 在 SimpleDocker 管理终端执行：
 
@@ -55,13 +90,13 @@ docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}'
 
 优先使用 `docker compose`。如果只有 `docker-compose`，把后续命令中的 `docker compose` 替换成 `docker-compose`；两者都没有时，先通过 SimpleDocker 提供的可信安装方式补齐 Compose，不能只启动后端后让 Tunnel 直连 `9009`。
 
-## 2. 准备完整 ARM64 离线镜像
+### 2. 准备完整 ARM64 离线镜像
 
-推荐下载 Release 中的完整包：
+Release 中的一键完整包为：
 
 ```text
-kekeio-tab-router-arm64.tar
-kekeio-tab-router-arm64.tar.sha256
+kekeio-tab-router-arm64.tar.gz
+kekeio-tab-router-arm64.tar.gz.sha256
 ```
 
 它包含：
@@ -72,11 +107,14 @@ caddy:2.11.4-alpine
 cloudflare/cloudflared:2026.7.3
 ```
 
-把 tar 和校验文件复制到路由器同一目录后执行：
+如果不使用安装器而要手工检查包内镜像，执行：
 
 ```sh
-sha256sum -c kekeio-tab-router-arm64.tar.sha256
-docker load -i kekeio-tab-router-arm64.tar
+sha256sum -c kekeio-tab-router-arm64.tar.gz.sha256
+tar -xzf kekeio-tab-router-arm64.tar.gz
+cd kekeio-tab-router-arm64
+sha256sum -c images.tar.sha256
+docker load -i images.tar
 docker image inspect kekeio-tab:arm64 --format '{{.Os}}/{{.Architecture}}'
 docker image inspect caddy:2.11.4-alpine --format '{{.Os}}/{{.Architecture}}'
 docker image inspect cloudflare/cloudflared:2026.7.3 --format '{{.Os}}/{{.Architecture}}'
@@ -92,7 +130,7 @@ docker load -i kekeio-tab-docker-arm64.tar
 
 但该 tar 不包含 Caddy 和 cloudflared。完全离线部署时必须提前另外导入这两个固定版本镜像；不要让旧 Docker 临时拉取浮动 `latest`。
 
-## 3. 准备目录和环境
+### 3. 准备目录和环境
 
 将后端 Release ZIP 的 `deploy/router` 目录复制到路由器，例如：
 
@@ -152,7 +190,7 @@ KEKEIO_TRUSTED_PROXIES=172.30.88.2/32
 
 如果 `172.30.88.0/29` 与 LAN、VPN 或现有 Docker 网络重叠，整体换成一个不重叠的 `/29`，并同步修改三个静态地址。不要把 Docker 子网、`172.17.0.0/16` 或 cloudflared 地址加入管理网和可信代理。
 
-## 4. 创建新的 Token 文件
+### 4. 创建新的 Token 文件
 
 先在 Cloudflare 控制台创建或重建 Tunnel，复制新 Token。不要执行控制台给出的含明文 Token 的 `docker run` 命令。
 
@@ -183,7 +221,7 @@ stat -c '%u:%g %a %n' "$token_file"
 
 不要用 `cat`、`echo`、`docker inspect` 或日志回显 Token。若 USB 文件系统无法保存上述属主和权限，停止部署并先换用合适文件系统。
 
-## 5. 选择 Tunnel 网络方案
+### 5. 选择 Tunnel 网络方案
 
 ### 小米/SimpleDocker 推荐方案
 
@@ -225,7 +263,7 @@ docker compose -p kekeio-tab \
 
 标准方案中 cloudflared 固定为 `172.30.88.4`，但后端仍只信任 Caddy 的 `172.30.88.2/32`。任何情况下都不能让 cloudflared 直连 backend。
 
-## 6. 配置 Cloudflare Published application
+### 6. 配置 Cloudflare Published application
 
 在 Cloudflare 控制台进入 `Networking -> Tunnels`，打开新 Tunnel，添加 Published application：
 
@@ -255,7 +293,7 @@ Tunnel 会建立出站连接，不需要开放或转发 WAN `80/443/8080/8443/90
 
 不要给整个域名套一个会阻断扩展 API 的交互式 Cloudflare Access 登录页。若以后需要 Access，应使用独立管理域名并重新设计后端信任边界。
 
-## 7. 首次安装与局域网 HTTPS
+### 7. 首次安装与局域网 HTTPS
 
 Tunnel 配置使用 `Caddyfile.tunnel`：
 
@@ -305,7 +343,7 @@ docker compose -p kekeio-tab \
 
 安装前 `/health/ready` 返回 503 是正常门禁；安装完成后必须变成 200。
 
-## 8. 上线验收
+### 8. 上线验收
 
 ### 容器与网络
 
@@ -365,14 +403,14 @@ docker inspect cloudflared-tab --format '{{json .Config.Cmd}}'
 
 输出中只能看到 Token 文件路径，不能出现 Token 本身。
 
-## 9. 备份、升级与回滚
+### 9. 备份、升级与回滚
 
 升级前：
 
 1. 在后台创建一份完整备份并保存恢复口令。
 2. 把备份复制到第二介质或离机存储。
 3. 记录三个镜像的 ID 和 RepoDigest。
-4. 保留当前与上一版完整 ARM64 tar 及 `.sha256`。
+4. 保留当前与上一版完整 ARM64 一键包及 `.sha256`。
 
 ```sh
 docker image inspect kekeio-tab:arm64 --format '{{.Id}} {{json .RepoDigests}}'
@@ -380,22 +418,19 @@ docker image inspect caddy:2.11.4-alpine --format '{{.Id}} {{json .RepoDigests}}
 docker image inspect cloudflare/cloudflared:2026.7.3 --format '{{.Id}} {{json .RepoDigests}}'
 ```
 
-加载新包后，用原来的两份 Compose 文件重建：
+一键安装器管理的部署直接上传新包并重新运行：
 
 ```sh
-docker load -i kekeio-tab-router-arm64-new.tar
-docker compose -p kekeio-tab \
-  --env-file .env \
-  -f compose.yaml \
-  -f compose.tunnel-simpledocker.yaml \
-  up -d --pull never
+tar -xzf kekeio-tab-router-arm64.tar.gz && sh kekeio-tab-router-arm64/install.sh
 ```
+
+高级手工 Compose 部署仍按原 `.env` 和两份 Compose 文件重建。
 
 不要同时运行两个后端实例访问同一个 SQLite 数据目录。若新版本迁移了数据库，二进制回滚前必须恢复与旧版本兼容的迁移前快照或完整备份。
 
 轮换 Tunnel Token 时：先在 Cloudflare 控制台 Rotate，再安全覆盖本地 Token 文件并重建 cloudflared；最后强制断开旧连接并验证新 connector Healthy。
 
-## 10. 常见故障
+### 10. 常见故障
 
 ### Compose 解析失败
 
@@ -436,7 +471,7 @@ docker logs --tail 100 cloudflared-tab
 
 路由器只有 4 核且存储为 USB。保留较小的密码哈希并发，监控 SQLite、WAL、自动备份、访问日志和磁盘真实可用空间。上线前用接近真实大小的数据库执行备份并观察 `/health/ready` 与同步延迟。
 
-## 11. 不使用 Tunnel 的直连模式
+### 11. 不使用 Tunnel 的直连模式
 
 只有明确需要 WAN 端口转发时才使用基础 `Caddyfile` 和 `compose.yaml`：
 
