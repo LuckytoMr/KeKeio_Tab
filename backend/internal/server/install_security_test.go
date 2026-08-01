@@ -15,6 +15,18 @@ import (
 	"time"
 )
 
+func postInstallSession(t *testing.T, handler http.Handler) *httptest.ResponseRecorder {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodPost, "/install/api/v1/session", strings.NewReader(`{}`))
+	request.Host = "install.example.test"
+	request.RemoteAddr = "127.0.0.1:1234"
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Origin", "http://install.example.test")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	return response
+}
+
 func TestNumberedMigrationRunsOnceAndReopenKeepsPluginSession(t *testing.T) {
 	path := t.TempDir() + "/reopen.db"
 	store, err := OpenStore(path)
@@ -100,18 +112,49 @@ func TestLegacyUnsafeAuthAndAdminWritesRequireProtocolUpgrade(t *testing.T) {
 	}
 }
 
-func TestInstallWritesAllowSameOriginWithoutConfiguredCrossOrigin(t *testing.T) {
+func TestInstallSessionAndWritesRequireSameOrigin(t *testing.T) {
 	store := newTestStore(t)
 	app := NewApp(store, Config{
 		InstallCookieName: "fullpro_test_install",
-		InstallCode:       "0123456789abcdef0123456789abcdef",
 	})
 	handler := app.Routes()
 
-	sessionRequest := httptest.NewRequest(http.MethodPost, "/install/api/v1/session", strings.NewReader(`{"installCode":"0123456789abcdef0123456789abcdef"}`))
+	remoteRequest := httptest.NewRequest(http.MethodPost, "/install/api/v1/session", strings.NewReader(`{}`))
+	remoteRequest.Host = "install.example.test"
+	remoteRequest.RemoteAddr = "203.0.113.8:1234"
+	remoteRequest.Header.Set("Content-Type", "application/json")
+	remoteRequest.Header.Set("Origin", "http://install.example.test")
+	remoteResponse := httptest.NewRecorder()
+	handler.ServeHTTP(remoteResponse, remoteRequest)
+	if remoteResponse.Code != http.StatusNotFound {
+		t.Fatalf("remote install session = %d %s, want 404", remoteResponse.Code, remoteResponse.Body.String())
+	}
+
+	for name, origin := range map[string]string{
+		"missing":      "",
+		"cross-origin": "http://evil.example.test",
+	} {
+		t.Run(name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "/install/api/v1/session", strings.NewReader(`{}`))
+			request.Host = "install.example.test"
+			request.RemoteAddr = "127.0.0.1:1234"
+			request.Header.Set("Content-Type", "application/json")
+			if origin != "" {
+				request.Header.Set("Origin", origin)
+			}
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), `"code":"ORIGIN_REJECTED"`) {
+				t.Fatalf("install session origin %q = %d %s, want 403 ORIGIN_REJECTED", origin, response.Code, response.Body.String())
+			}
+		})
+	}
+
+	sessionRequest := httptest.NewRequest(http.MethodPost, "/install/api/v1/session", strings.NewReader(`{}`))
 	sessionRequest.Host = "install.example.test"
 	sessionRequest.RemoteAddr = "127.0.0.1:1234"
 	sessionRequest.Header.Set("Content-Type", "application/json")
+	sessionRequest.Header.Set("Origin", "http://install.example.test")
 	sessionResponse := httptest.NewRecorder()
 	handler.ServeHTTP(sessionResponse, sessionRequest)
 	if sessionResponse.Code != http.StatusCreated {
@@ -147,18 +190,41 @@ func TestInstallWritesAllowSameOriginWithoutConfiguredCrossOrigin(t *testing.T) 
 	}
 }
 
+func TestAdministratorPasswordMinimumCountsUnicodeCharacters(t *testing.T) {
+	tests := []struct {
+		name      string
+		password  string
+		wantError bool
+	}{
+		{name: "three Unicode characters", password: "甲乙丙", wantError: true},
+		{name: "four Unicode characters", password: "甲乙丙丁", wantError: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			store := newTestStore(t)
+			_, err := store.BeginInstallation(t.Context(), InstallationInput{
+				Mode:            "fresh_install",
+				Email:           "owner@example.test",
+				DisplayName:     "Owner",
+				Password:        test.password,
+				ExternalBaseURL: "https://fullpro.example.test",
+			})
+			if test.wantError && err == nil {
+				t.Fatal("three-character administrator password was accepted")
+			}
+			if !test.wantError && err != nil {
+				t.Fatalf("four-character administrator password was rejected: %v", err)
+			}
+		})
+	}
+}
+
 func TestInstallCreatesIndependentAdminAndClosesInstallRoute(t *testing.T) {
 	store := newTestStore(t)
 	smtpTested := false
-	installCodePath := filepath.Join(t.TempDir(), "install-code")
-	if err := os.WriteFile(installCodePath, []byte("0123456789abcdef0123456789abcdef\n"), 0o600); err != nil {
-		t.Fatalf("seed install code file: %v", err)
-	}
 	app := NewApp(store, Config{
 		CookieName:         "fullpro_test_session",
 		InstallCookieName:  "fullpro_test_install",
-		InstallCode:        "0123456789abcdef0123456789abcdef",
-		InstallCodePath:    installCodePath,
 		AllowedOrigins:     []string{"http://localhost:5173"},
 		AdminAllowedCIDRs:  []string{"127.0.0.1/32", "::1/128"},
 		TokenDerivationKey: []byte("0123456789abcdef0123456789abcdef"),
@@ -169,16 +235,7 @@ func TestInstallCreatesIndependentAdminAndClosesInstallRoute(t *testing.T) {
 	})
 	handler := app.Routes()
 
-	missingCode := postJSON(t, handler, "/install/api/v1/session", `{}`)
-	if missingCode.Code != http.StatusUnauthorized {
-		t.Fatalf("missing install code = %d %s, want 401", missingCode.Code, missingCode.Body.String())
-	}
-	wrongCode := postJSON(t, handler, "/install/api/v1/session", `{"installCode":"ffffffffffffffffffffffffffffffff"}`)
-	if wrongCode.Code != http.StatusUnauthorized {
-		t.Fatalf("wrong install code = %d %s, want 401", wrongCode.Code, wrongCode.Body.String())
-	}
-
-	session := postJSON(t, handler, "/install/api/v1/session", `{"installCode":"0123456789abcdef0123456789abcdef"}`)
+	session := postInstallSession(t, handler)
 	if session.Code != http.StatusCreated {
 		t.Fatalf("install session = %d %s", session.Code, session.Body.String())
 	}
@@ -249,13 +306,13 @@ func TestInstallCreatesIndependentAdminAndClosesInstallRoute(t *testing.T) {
 	if pluginPreflight.Code != http.StatusNoContent {
 		t.Fatalf("installed extension CORS preflight = %d %s, want 204 without restart", pluginPreflight.Code, pluginPreflight.Body.String())
 	}
-	if _, err := os.Stat(installCodePath); !os.IsNotExist(err) {
-		t.Fatalf("completed installation retained install code: %v", err)
-	}
-
 	closed := get(t, handler, "/install/api/v1/status")
 	if closed.Code != http.StatusNotFound {
 		t.Fatalf("completed install route = %d %s, want 404", closed.Code, closed.Body.String())
+	}
+	closedSession := postInstallSession(t, handler)
+	if closedSession.Code != http.StatusNotFound {
+		t.Fatalf("completed install session = %d %s, want 404", closedSession.Code, closedSession.Body.String())
 	}
 
 	preauth := get(t, handler, "/api/admin/v1/auth/session")
@@ -444,16 +501,16 @@ func TestTrustedProxyHTTPSAlwaysSetsSecureInstallCookie(t *testing.T) {
 	store := newTestStore(t)
 	app := NewApp(store, Config{
 		InstallCookieName: "fullpro_test_install",
-		InstallCode:       "0123456789abcdef0123456789abcdef",
 		CookieSecure:      false,
 		AdminAllowedCIDRs: []string{"192.168.0.0/16"},
 		TrustedProxyCIDRs: []string{"10.0.0.0/8"},
 	})
-	request := httptest.NewRequest(http.MethodPost, "/install/api/v1/session", strings.NewReader(`{"installCode":"0123456789abcdef0123456789abcdef"}`))
+	request := httptest.NewRequest(http.MethodPost, "/install/api/v1/session", strings.NewReader(`{}`))
 	request.RemoteAddr = "10.0.0.5:443"
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("X-Forwarded-For", "192.168.1.9")
 	request.Header.Set("X-Forwarded-Proto", "https")
+	request.Header.Set("Origin", "https://example.com")
 	response := httptest.NewRecorder()
 	app.Routes().ServeHTTP(response, request)
 	if response.Code != http.StatusCreated {
@@ -544,12 +601,11 @@ func TestAdminResetPreservesUsersContentAndSettingsButRevokesSessions(t *testing
 	config := ApplyRuntimeSettings(Config{
 		CookieName:        "fullpro_test_session",
 		InstallCookieName: "fullpro_test_install",
-		InstallCode:       "0123456789abcdef0123456789abcdef",
 		SecretsPath:       secretsPath,
 	}, runtimeSettings, secrets, RuntimeOverrides{})
 	app := NewApp(store, config)
 	handler := app.Routes()
-	session := postJSON(t, handler, "/install/api/v1/session", `{"installCode":"0123456789abcdef0123456789abcdef"}`)
+	session := postInstallSession(t, handler)
 	if !strings.Contains(session.Body.String(), `"mode":"admin_reset"`) {
 		t.Fatalf("admin reset session = %d %s", session.Code, session.Body.String())
 	}
@@ -695,7 +751,7 @@ func TestInstallCompleteStoresSMTPPasswordOnlyInSecrets(t *testing.T) {
 	}
 	app := NewApp(store, Config{
 		CookieName: "fullpro_test_session", InstallCookieName: "fullpro_test_install",
-		InstallCode: "0123456789abcdef0123456789abcdef", SecretsPath: secretsPath,
+		SecretsPath:    secretsPath,
 		AllowedOrigins: []string{"http://localhost:5173"},
 		SMTPTester: func(_ context.Context, input SMTPTestInput) error {
 			if input.Recipient != "owner@example.com" {
@@ -705,7 +761,7 @@ func TestInstallCompleteStoresSMTPPasswordOnlyInSecrets(t *testing.T) {
 		},
 	})
 	handler := app.Routes()
-	session := postJSON(t, handler, "/install/api/v1/session", `{"installCode":"0123456789abcdef0123456789abcdef"}`)
+	session := postInstallSession(t, handler)
 	installCookie := responseCookie(t, session, "fullpro_test_install")
 	var sessionBody struct {
 		Data struct {
@@ -787,12 +843,11 @@ func TestInstallSecretFailureLeavesDatabaseRetryable(t *testing.T) {
 	}
 	app := NewApp(store, Config{
 		InstallCookieName: "fullpro_test_install",
-		InstallCode:       "0123456789abcdef0123456789abcdef",
 		SecretsPath:       secretsPath,
 		AllowedOrigins:    []string{"http://localhost:5173"},
 	})
 	handler := app.Routes()
-	session := postJSON(t, handler, "/install/api/v1/session", `{"installCode":"0123456789abcdef0123456789abcdef"}`)
+	session := postInstallSession(t, handler)
 	cookie := responseCookie(t, session, "fullpro_test_install")
 	var sessionBody struct {
 		Data struct {
@@ -856,7 +911,6 @@ func TestConcurrentInstallCompletionCannotRollbackWinningSMTPSecret(t *testing.T
 	}
 	app := NewApp(store, Config{
 		InstallCookieName: "fullpro_test_install",
-		InstallCode:       "0123456789abcdef0123456789abcdef",
 		SecretsPath:       secretsPath,
 		AllowedOrigins:    []string{"http://localhost:5173"},
 	})
@@ -875,7 +929,7 @@ func TestConcurrentInstallCompletionCannotRollbackWinningSMTPSecret(t *testing.T
 		csrf   string
 	}
 	newSession := func() auth {
-		response := postJSON(t, handler, "/install/api/v1/session", `{"installCode":"0123456789abcdef0123456789abcdef"}`)
+		response := postInstallSession(t, handler)
 		var body struct {
 			Data struct {
 				CSRFToken string `json:"csrfToken"`

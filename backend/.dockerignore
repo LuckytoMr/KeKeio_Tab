@@ -18,7 +18,6 @@ admin-ui/dist
 *.log
 .env*
 secrets.json
-install-code
 dev-credentials.json
 fullpro-server.exe
 fullpro-server

@@ -4,7 +4,7 @@ KeKeIO Tab 的单机自托管后端，提供邮箱验证账号、`SharedProfile 
 
 ## Docker 正式部署
 
-正式后端统一监听容器端口 `9009`。固定 LAN 为 `192.168.50.1/24` 的小米/SimpleDocker 可使用 `main-latest` 或正式 Release 中的 `kekeio-tab-simpledocker-arm64.zip`，按包内 `docker命令.txt` 直接启动应用和 cloudflared 两个容器：
+正式后端统一监听容器端口 `9009`。固定 LAN 为 `192.168.50.1/24` 的小米/SimpleDocker 只需从 `main-latest` 或正式 Release 下载 `kekeio-tab-docker-arm64.tar`，保留现有 `cloudflared.env`，再按仓库根目录的 `docker命令.txt` 启动应用和 cloudflared 两个容器：
 
 ```sh
 docker load -i kekeio-tab-docker-arm64.tar
@@ -13,13 +13,7 @@ docker load -i kekeio-tab-docker-arm64.tar
 
 该模式使用宿主机已确认的固定路径 `/mnt/usb-24aeefbb/mi_docker/kekeio`，避免 SimpleDocker 终端中的 `/data` 被 Docker daemon 解释为另一个宿主路径。镜像入口会初始化两个专用挂载点后降权到 UID `10001`，修复 Docker 自动创建 root 目录导致的 SQLite `unable to open database file (14)`。Cloudflare origin 固定为 `http://localhost:9009`；后端只信任共享命名空间的 loopback cloudflared，并从 `X-Forwarded-For` 恢复真实客户端 IP。公网管理路径由后端隐藏为 `404`。
 
-需要 Caddy 公网白名单、LAN HTTPS 和只读 Token 文件时，使用完整隔离包：
-
-```sh
-tar -xzf kekeio-tab-router-arm64.tar.gz && sh kekeio-tab-router-arm64/install.sh
-```
-
-脚本直接调用 Docker，不要求路由器安装 Compose；它会自动加载三张 ARM64 镜像，并以 Docker 命名卷保存数据、备份、Caddyfile 和 Token，避免管理终端路径被 Docker daemon 解释成另一个宿主路径。
+需要 Caddy 公网白名单、LAN HTTPS 和只读 Token 文件时，可使用仓库内保留的高级 Compose 与安装器源码；GitHub Actions 不再额外生成完整隔离归档。
 
 - [完整路由器部署指南](deploy/router/README.md)
 - [Docker Compose](deploy/router/compose.yaml)
@@ -30,26 +24,26 @@ tar -xzf kekeio-tab-router-arm64.tar.gz && sh kekeio-tab-router-arm64/install.sh
 - [一键安装器](deploy/router/install.sh)
 - [直接模式 Token 配置样例](deploy/router/cloudflared.env.example)
 
-以下命令只用于高级手工检查；一键安装不依赖 Compose：
+以下命令只用于高级手工检查；仓库内的高级安装器源码不依赖 Compose：
 
 ```sh
 # Git 仓库中：cd backend/deploy/router
-# 后端 Release ZIP 解压后：cd deploy/router
 cp router.env.example .env
 # 填写固定镜像、持久目录、路由器 LAN 地址、精确管理 CIDR 与 Tunnel 文件路径
 docker compose -p kekeio-tab --env-file .env \
   -f compose.yaml -f compose.tunnel-simpledocker.yaml config
 ```
 
-### 一键 ARM64 Docker 包
+### GitHub Release 固定文件
 
-从 `main-latest` 滚动预发布或 `v*` 正式 GitHub Release 下载完整路由器包并执行：
+每次 `main` 或 `v*` 发布只上传：
 
-```sh
-tar -xzf kekeio-tab-router-arm64.tar.gz && sh kekeio-tab-router-arm64/install.sh
+```text
+kekeio-tab-extension.zip
+kekeio-tab-docker-arm64.tar
 ```
 
-完整包包含 `kekeio-tab:arm64`、`caddy:2.11.4-alpine`、`cloudflare/cloudflared:2026.7.3`、一键安装器及 Caddy 配置。需要校验外层下载文件时可再下载同名 `.sha256`；安装器始终会校验包内镜像归档。`kekeio-tab-simpledocker-arm64.zip` 则包含应用和构建时最新 cloudflared 的 ARM64 离线镜像、直接命令及 Token 配置样例。
+Docker tar 包含 `kekeio-tab:arm64` 与构建时最新的 ARM64 `cloudflare/cloudflared:latest`，并在发布前完成重新加载、架构、健康、SQLite 写入、UID/GID 和共享网络命名空间验证。不会额外生成后端 ZIP、SimpleDocker 外层 ZIP、完整路由器包、`.sha256` 附件或 GHCR 镜像。
 
 只有选择高级手工模式时，才需要在 `deploy/router/.env` 中设置镜像、LAN、CIDR、Docker bridge gateway 和 Token 文件路径，再执行：
 
@@ -59,11 +53,12 @@ docker compose -p kekeio-tab --env-file .env \
   up -d --pull never
 ```
 
-完整隔离路径不登录 GHCR，也不执行 pull。直接模式按用户要求把 Token 保存在路由器本地 `cloudflared.env`，它会进入 cloudflared 容器配置，因此只能由可信管理员访问 Docker；真实文件已被 `.gitignore` 排除，绝不能提交 Git。`bin/fullpro-server-linux-arm64` 是非 Docker 场景的裸二进制，不能执行 `docker load -i bin/fullpro-server-linux-arm64`。
+直接模式按用户要求把 Token 保存在路由器本地 `cloudflared.env`，它会进入 cloudflared 容器配置，因此只能由可信管理员访问 Docker；真实文件已被 `.gitignore` 排除，绝不能提交 Git。
 
-Tunnel 链路为：
+直接模式与高级隔离模式的链路分别为：
 
 ```text
+https://tab.kekeio.com -> Cloudflare Edge -> cloudflared -> localhost:9009
 https://tab.kekeio.com -> Cloudflare Edge -> cloudflared -> Caddy :8081 -> backend:9009
 ```
 
@@ -73,11 +68,7 @@ Tunnel 只需出站连接，不做 WAN 端口转发。只有 `docker命令.txt` 
 
 ### 首次安装
 
-首次启动会生成 128-bit 一次性安装码，同时输出到容器日志并写入 `/data/install-code`：
-
-```sh
-docker compose --env-file .env -f compose.yaml logs backend
-```
+首次从允许的局域网打开安装入口时，管理端会自动建立安装会话，不生成或要求一次性安装码。安装会话仍使用 HttpOnly/SameSite Cookie、CSRF、来源校验和过期时间，并且只能在未初始化或管理员重置状态使用。
 
 直接模式从允许的局域网打开：
 
@@ -91,7 +82,7 @@ http://192.168.50.1:9009/install
 https://<路由器LAN地址>:8443/install
 ```
 
-安装向导会完成环境检查、独立管理员创建、公网 API、精确扩展来源、SMTP、配额及保留策略配置。公网 URL 填 `https://tab.kekeio.com`，不要追加 `:9009` 或 `:8443`；备份目录填 `/backups`。系统没有默认管理员账号或固定生产密码，安装完成后一次性安装码会失效并删除。
+安装向导会完成环境检查、独立管理员创建、公网 API、精确扩展来源、SMTP、配额及保留策略配置。公网 URL 填 `https://tab.kekeio.com`，不要追加 `:9009` 或 `:8443`；备份目录填 `/backups`。管理员密码最低固定为 4 个 Unicode 字符，系统没有默认管理员账号或固定生产密码。
 
 Tunnel 模式的后台入口是 `https://<路由器LAN地址>:8443/admin`；公网 `https://tab.kekeio.com/admin` 必须返回 404。Caddy 只允许 `.env` 中配置的精确 LAN/VLAN 来源访问 `/admin*`、`/install*` 和 `/api/admin/*`，后端还会再次执行管理员 CIDR 与 HTTPS 校验。任一公网管理路径不是 404 都必须停止上线。
 
@@ -128,8 +119,6 @@ FULLPRO_ADDR=:9009
 FULLPRO_DB=/data/fullpro.db
 FULLPRO_BACKUP_DIRECTORY=/backups
 FULLPRO_SECRETS_FILE=/data/secrets.json
-FULLPRO_INSTALL_CODE_FILE=/data/install-code
-FULLPRO_INSTALL_CODE=<可选的显式一次性安装码>
 FULLPRO_COOKIE_NAME=fullpro_session
 FULLPRO_INSTALL_COOKIE_NAME=fullpro_install
 FULLPRO_COOKIE_SECURE=true

@@ -108,10 +108,10 @@ func TestEnvBoolAcceptsExplicitLANHTTPOptIn(t *testing.T) {
 	}
 }
 
-func TestRunAdminResetRevokesAccessAndCreatesOneTimeCode(t *testing.T) {
+func TestRunAdminResetRevokesAccessWithoutCreatingOneTimeCode(t *testing.T) {
 	directory := t.TempDir()
 	databasePath := filepath.Join(directory, "fullpro.db")
-	codePath := filepath.Join(directory, "admin-reset-code")
+	codePath := filepath.Join(directory, "install-code")
 	store, err := server.OpenStore(databasePath)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
@@ -127,14 +127,11 @@ func TestRunAdminResetRevokesAccessAndCreatesOneTimeCode(t *testing.T) {
 	}
 
 	t.Setenv("FULLPRO_DB", databasePath)
-	t.Setenv("FULLPRO_INSTALL_CODE_FILE", codePath)
-	t.Setenv("FULLPRO_INSTALL_CODE", "")
 	if err := runAdminReset(); err != nil {
 		t.Fatalf("run admin reset: %v", err)
 	}
-	code, err := os.ReadFile(codePath)
-	if err != nil || len(string(code)) < 32 {
-		t.Fatalf("admin reset code file invalid: len=%d err=%v", len(string(code)), err)
+	if _, err := os.Stat(codePath); !os.IsNotExist(err) {
+		t.Fatalf("admin reset unexpectedly created a one-time code: %v", err)
 	}
 	reopened, err := server.OpenStore(databasePath)
 	if err != nil {

@@ -12,12 +12,36 @@ function clientStub(overrides: Partial<ApiClient>): ApiClient {
 describe("App route orchestration", () => {
   it("treats /install as a standalone route without probing admin auth", async () => {
     window.history.replaceState(null, "", "/install");
-    const get = vi.fn().mockResolvedValue({ state: "uninitialized", mode: "fresh_install", requiresCode: true });
-    render(<App client={clientStub({ get })} />);
+    const get = vi.fn().mockResolvedValue({ state: "uninitialized" });
+    const post = vi.fn().mockResolvedValue({ mode: "fresh_install", csrfToken: "csrf-install" });
+    render(<App client={clientStub({ get, post })} />);
 
-    expect(await screen.findByRole("heading", { name: "验证安装码" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "环境检查" })).toBeInTheDocument();
     expect(get).toHaveBeenCalledWith("/install/api/v1/status");
     expect(get).not.toHaveBeenCalledWith("/api/admin/v1/auth/session");
+    expect(post).toHaveBeenCalledWith("/install/api/v1/session", {});
+  });
+
+  it("leaves install-session 401 recovery to the standalone install wizard", async () => {
+    window.history.replaceState(null, "", "/install");
+    let notifyUnauthorized!: () => void;
+    const onUnauthorized = vi.fn((listener: () => void) => {
+      notifyUnauthorized = listener;
+      return vi.fn();
+    });
+    const client = clientStub({
+      get: vi.fn().mockResolvedValue({ state: "uninitialized" }),
+      post: vi.fn().mockResolvedValue({ mode: "fresh_install", csrfToken: "csrf-install" }),
+      onUnauthorized: onUnauthorized as unknown as ApiClient["onUnauthorized"]
+    });
+    render(<App client={client} />);
+
+    expect(await screen.findByRole("heading", { name: "环境检查" })).toBeInTheDocument();
+    await waitFor(() => expect(onUnauthorized).toHaveBeenCalled());
+    notifyUnauthorized();
+
+    expect(window.location.pathname).toBe("/install");
+    expect(screen.getByRole("heading", { name: "环境检查" })).toBeInTheDocument();
   });
 
   it("obtains a fresh pre-auth CSRF token after an expired session before rendering login", async () => {

@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
-import { Check, ChevronLeft, ChevronRight, KeyRound, LoaderCircle, LockKeyhole, MailCheck, ServerCog } from "lucide-preact";
+import { Check, ChevronLeft, ChevronRight, LoaderCircle, LockKeyhole, MailCheck, ServerCog } from "lucide-preact";
 import type { ApiClient } from "../lib/api";
 import { ApiError } from "../lib/api";
 import { FormErrorSummary } from "../components/common";
@@ -69,8 +69,6 @@ export function LoginPage({
 
 interface InstallStatus {
   state: "uninitialized" | "requires_admin_reset" | "installed";
-  mode: "fresh_install" | "admin_reset";
-  requiresCode?: boolean;
 }
 
 interface InstallSession {
@@ -106,6 +104,7 @@ export interface InstallDraft {
 
 const defaultPublicBaseUrl = "https://tab.kekeio.com";
 const defaultSMTPPreset = getSMTPPreset("cloudflare");
+export const minimumAdminPasswordLength = 4;
 
 const defaultDraft: InstallDraft = {
   adminEmail: "",
@@ -211,7 +210,9 @@ export function validateInstallStepInput(
   if (step === "管理员账号") {
     if (!draft.adminEmail.trim()) result.adminEmail = "请输入管理员邮箱";
     if (!draft.displayName.trim()) result.displayName = "请输入显示名";
-    if (draft.password.length < 12) result.adminPassword = "管理员密码至少 12 位";
+    if (Array.from(draft.password).length < minimumAdminPasswordLength) {
+      result.adminPassword = `管理员密码至少 ${minimumAdminPasswordLength} 位`;
+    }
     if (draft.password !== draft.passwordConfirm) result.passwordConfirm = "两次密码不一致";
   }
   if (step === "公网 API" && mode === "fresh_install") {
@@ -234,7 +235,7 @@ export function InstallWizard({ client, onInstalled }: { client: ApiClient; onIn
   const initialProgress = useRef(loadProgress());
   const [status, setStatus] = useState<InstallStatus | null>(null);
   const [session, setSession] = useState<InstallSession | null>(null);
-  const [installCode, setInstallCode] = useState("");
+  const [sessionStarting, setSessionStarting] = useState(false);
   const [draft, setDraft] = useState<InstallDraft>(initialProgress.current.draft);
   const draftRef = useRef(draft);
   draftRef.current = draft;
@@ -245,12 +246,42 @@ export function InstallWizard({ client, onInstalled }: { client: ApiClient; onIn
   const [loadError, setLoadError] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  const establishSession = async (recoveryMessage = "") => {
+    setSessionStarting(true);
+    setLoadError("");
+    setErrors({});
+    client.setCsrfToken(null);
+    try {
+      const next = await client.post<InstallSession>("/install/api/v1/session", {});
+      const csrfToken = next.csrfToken?.trim();
+      if (!csrfToken) throw new Error("服务器未提供安装会话所需的 CSRF 令牌");
+      client.setCsrfToken(csrfToken);
+      setSession({ ...next, csrfToken });
+      setStepIndex(0);
+      setPreflight(null);
+      setSmtpVerified(false);
+      if (recoveryMessage) setErrors({ session: recoveryMessage });
+    } catch (value) {
+      client.setCsrfToken(null);
+      setSession(null);
+      setLoadError(value instanceof ApiError ? value.message : value instanceof Error ? value.message : "无法建立安装会话");
+    } finally {
+      setSessionStarting(false);
+    }
+  };
+
   const loadStatus = async () => {
     setLoadError("");
+    setStatus(null);
+    setSession(null);
     try {
       const next = await client.get<InstallStatus>("/install/api/v1/status");
       setStatus(next);
-      if (next.state === "installed") onInstalled();
+      if (next.state === "installed") {
+        onInstalled();
+        return;
+      }
+      await establishSession();
     } catch (value) {
       setLoadError(value instanceof ApiError ? value.message : "无法读取安装状态");
     }
@@ -277,32 +308,8 @@ export function InstallWizard({ client, onInstalled }: { client: ApiClient; onIn
     if (!(value instanceof ApiError) || (value.status !== 401 && value.code !== "INSTALL_SESSION_EXPIRED")) return false;
     client.setCsrfToken(null);
     setSession(null);
-    setInstallCode("");
-    setErrors({ installCode: value.message || "安装会话已过期，请重新验证安装码" });
+    void establishSession("安装会话已过期，已自动建立新会话，请重新运行环境检查");
     return true;
-  };
-
-  const establishSession = async (event: Event) => {
-    event.preventDefault();
-    if (!installCode.trim()) {
-      setErrors({ installCode: "请输入一次性安装码" });
-      return;
-    }
-    setBusy(true);
-    setErrors({});
-    try {
-      const next = await client.post<InstallSession>("/install/api/v1/session", { installCode: installCode.trim() });
-      client.setCsrfToken(next.csrfToken);
-      setSession(next);
-      setInstallCode("");
-      setStepIndex(0);
-      setPreflight(null);
-      setSmtpVerified(false);
-    } catch (value) {
-      setErrors({ installCode: value instanceof ApiError ? value.message : "无法建立安装会话" });
-    } finally {
-      setBusy(false);
-    }
   };
 
   const validateStep = (): Record<string, string> => {
@@ -383,17 +390,7 @@ export function InstallWizard({ client, onInstalled }: { client: ApiClient; onIn
   }
   if (!status) return <AuthFrame title="正在检查安装状态" copy="正在确认服务是否需要初始化。" icon={<LoaderCircle class="spin" aria-hidden="true" />}><div class="skeleton-lines" aria-label="正在加载" /></AuthFrame>;
   if (!session) {
-    return (
-      <AuthFrame title="验证安装码" copy="安装入口只在未初始化或管理员重置期间开放。安装码可在容器日志或数据卷的 install-code 文件中找到。" icon={<KeyRound aria-hidden="true" />}>
-        <FormErrorSummary errors={errors} focusOnMount />
-        <form class="stack-form" onSubmit={establishSession} noValidate>
-          <label htmlFor="installCode">一次性安装码</label>
-          <input id="installCode" type="password" autoComplete="off" value={installCode} onInput={(event) => setInstallCode(event.currentTarget.value)} aria-describedby="install-code-help" />
-          <p id="install-code-help" class="field-help">安装码不会保存到浏览器。验证失败不会暴露服务配置。</p>
-          <button class="button primary full-width" type="submit" disabled={busy}>{busy ? "正在验证…" : "建立安全安装会话"}</button>
-        </form>
-      </AuthFrame>
-    );
+    return <AuthFrame title="正在建立安装会话" copy="正在通过当前局域网连接准备安全安装环境。" icon={<LoaderCircle class="spin" aria-hidden="true" />}><div class="skeleton-lines" aria-label={sessionStarting ? "正在建立安装会话" : "正在加载"} /></AuthFrame>;
   }
 
   return (
@@ -439,7 +436,7 @@ function EnvironmentStep({ checks, busy, onRun }: { checks: Array<{ label: strin
 }
 
 function AdminStep({ draft, patch }: { draft: InstallDraft; patch: PatchDraft }) {
-  return <section class="workflow-section form-section"><div class="form-grid"><label htmlFor="adminEmail">管理员邮箱</label><input id="adminEmail" type="email" autoComplete="username" value={draft.adminEmail} onInput={(e) => patch("adminEmail", e.currentTarget.value)} /><label htmlFor="displayName">显示名</label><input id="displayName" value={draft.displayName} onInput={(e) => patch("displayName", e.currentTarget.value)} /><label htmlFor="adminPassword">密码</label><input id="adminPassword" type="password" autoComplete="new-password" value={draft.password} onInput={(e) => patch("password", e.currentTarget.value)} /><label htmlFor="passwordConfirm">再次输入密码</label><input id="passwordConfirm" type="password" autoComplete="new-password" value={draft.passwordConfirm} onInput={(e) => patch("passwordConfirm", e.currentTarget.value)} /></div><p class="field-help">至少 12 位并避免常见弱密码。密码不会写入浏览器存储。</p></section>;
+  return <section class="workflow-section form-section"><div class="form-grid"><label htmlFor="adminEmail">管理员邮箱</label><input id="adminEmail" type="email" autoComplete="username" value={draft.adminEmail} onInput={(e) => patch("adminEmail", e.currentTarget.value)} /><label htmlFor="displayName">显示名</label><input id="displayName" value={draft.displayName} onInput={(e) => patch("displayName", e.currentTarget.value)} /><label htmlFor="adminPassword">密码</label><input id="adminPassword" type="password" autoComplete="new-password" value={draft.password} onInput={(e) => patch("password", e.currentTarget.value)} /><label htmlFor="passwordConfirm">再次输入密码</label><input id="passwordConfirm" type="password" autoComplete="new-password" value={draft.passwordConfirm} onInput={(e) => patch("passwordConfirm", e.currentTarget.value)} /></div><p class="field-help">至少 {minimumAdminPasswordLength} 个 Unicode 字符。密码不会写入浏览器存储。</p></section>;
 }
 
 function PublicApiStep({ draft, patch }: { draft: InstallDraft; patch: PatchDraft }) {

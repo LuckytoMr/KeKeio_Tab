@@ -28,8 +28,6 @@ type Config struct {
 	Addr                    string
 	CookieName              string
 	InstallCookieName       string
-	InstallCode             string
-	InstallCodePath         string
 	CookieSecure            bool
 	MaxBodyBytes            int64
 	AllowedOrigin           string
@@ -452,7 +450,6 @@ func (a *App) authRateLimitIdentity(r *http.Request) string {
 		Email        string `json:"email"`
 		Token        string `json:"token"`
 		RefreshToken string `json:"refreshToken"`
-		InstallCode  string `json:"installCode"`
 	}
 	if json.Unmarshal(body, &input) != nil {
 		return "malformed"
@@ -463,9 +460,6 @@ func (a *App) authRateLimitIdentity(r *http.Request) string {
 	}
 	if identity == "" {
 		identity = strings.TrimSpace(input.Token)
-	}
-	if identity == "" {
-		identity = strings.TrimSpace(input.InstallCode)
 	}
 	if identity == "" {
 		return "anonymous"

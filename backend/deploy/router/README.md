@@ -4,13 +4,7 @@
 
 ## 最简：Docker 直接运行
 
-GitHub Actions 的成功摘要会直接链接到 `main-latest` 滚动预发布；其中的 `kekeio-tab-simpledocker-arm64.zip` 包含：
-
-```text
-kekeio-tab-docker-arm64.tar
-docker命令.txt
-cloudflared.env.example
-```
+GitHub Actions 的成功摘要会直接链接到 `main-latest` 滚动预发布。部署时只下载 `kekeio-tab-docker-arm64.tar`；`docker命令.txt` 和 `cloudflared.env.example` 保留在仓库中，不再包装成额外 ZIP。
 
 操作顺序：
 
@@ -19,7 +13,7 @@ cloudflared.env.example
 3. 原样执行 `docker命令.txt` 中的两个 `docker run`，顺序必须是应用在前、cloudflared 在后。
 4. Cloudflare Published application 填 `HTTP`、`http://localhost:9009`，HTTP Host Header 留空。
 
-该模式把应用数据固定到 `/mnt/usb-24aeefbb/mi_docker/kekeio/data`，备份固定到同级 `backups`。这些路径由宿主 Docker daemon 解释，不使用 SimpleDocker 终端内部的 `/data`。Docker 首次自动创建 bind 目录时通常属于 root；镜像入口只修正这两个挂载点，验证可写后立即降权为 UID `10001`，避免 SQLite `unable to open database file (14)`。LAN 安装入口为 `http://192.168.50.1:9009/install`；`9009` 只绑定这个 LAN 地址，严禁 WAN 转发。
+该模式把应用数据固定到 `/mnt/usb-24aeefbb/mi_docker/kekeio/data`，备份固定到同级 `backups`。这些路径由宿主 Docker daemon 解释，不使用 SimpleDocker 终端内部的 `/data`。Docker 首次自动创建 bind 目录时通常属于 root；镜像入口只修正这两个挂载点，验证可写后立即降权为 UID `10001`，避免 SQLite `unable to open database file (14)`。LAN 安装入口为 `http://192.168.50.1:9009/install`；打开后会自动建立安装会话，不需要一次性安装码，管理员密码最低为 4 个 Unicode 字符。`9009` 只绑定这个 LAN 地址，严禁 WAN 转发。
 
 `cloudflared` 通过 `--network container:kekeio-tab` 访问 loopback。这个用法只有在命令同时保留 `FULLPRO_TRUSTED_PROXIES=127.0.0.1/32`、精确管理 CIDR 和 LAN HTTP 显式开关时才受支持：Cloudflare 提供的 `X-Forwarded-For` 会用于恢复真实公网客户端 IP，公网管理路径因此返回 `404`，而不是被误认为 loopback 管理员。目标 SimpleDocker 会把 LAN 请求呈现为默认 bridge 网关，因此只把已确认的 `172.17.0.1/32` 加入管理 CIDR；它绝不能加入可信代理。
 
@@ -44,37 +38,9 @@ Token 保存在路由器本地 `cloudflared.env`，以后 `docker restart` 或�
 
 公网入口只允许 `/`、`/api/v1/*`、账号验证/重置资源和健康端点。`/admin*`、`/install*`、`/api/admin/*` 永远不会进入 Tunnel。后端 `9009` 不发布到 WAN。
 
-## 完整隔离：一个包、一条命令
+## 完整隔离：源码高级方案
 
-GitHub Release 会生成：
-
-```text
-kekeio-tab-router-arm64.tar.gz
-kekeio-tab-router-arm64.tar.gz.sha256
-```
-
-默认只需把 `kekeio-tab-router-arm64.tar.gz` 上传到路由器，在 SimpleDocker 的 Docker 管理终端运行：
-
-```sh
-tar -xzf kekeio-tab-router-arm64.tar.gz && sh kekeio-tab-router-arm64/install.sh
-```
-
-若要额外校验下载过程，再上传同名 `.sha256` 并先执行 `sha256sum -c kekeio-tab-router-arm64.tar.gz.sha256`。即使省略外层校验，安装器仍会强制校验包内的 `images.tar`。
-
-一键安装器会自动完成：
-
-1. 校验并执行 `docker load`，加载应用、Caddy 和固定版本 cloudflared 三张 ARM64 镜像。
-2. 自动识别 `br-lan`/`br0` 的 LAN 地址和 Docker 默认 bridge 网关。
-3. 创建数据、备份、Token、Caddy 卷和隔离网络。
-4. 生成随机源站 Host，以无回显方式读取一次新 Tunnel Token。
-5. 直接通过 Docker CLI 创建并健康检查三个容器，不要求路由器安装 `docker compose`。
-6. 输出 Cloudflare Published application 需要填写的 Service URL、HTTP Host Header，以及局域网安装地址。
-
-安装器不能代替你登录 Cloudflare 账户创建 Tunnel，也不会要求或保存 Cloudflare API Token。创建 Tunnel、取得新 Tunnel Token并在控制台保存 Published application 是唯一保留的账户操作。
-
-更新时上传新包并再次运行同一命令即可；安装器会复用数据、备份、Caddy CA、源站 Host 和本地 Token 文件，只替换它自己管理的容器。如果同名容器来自早期 Compose 或手工命令，安装器会识别 `kekeio-tab` Compose 项目并迁移；其他未知同名容器默认拒绝删除，只有明确确认后才使用 `sh kekeio-tab-router-arm64/install.sh --replace`。
-
-下面的内容保留给排错、审计和不使用一键安装器的高级手工部署。
+仓库继续保留 Caddy、Compose 和 `install.sh` 供排错、审计或自行构建高级隔离环境，但 GitHub Actions 不再生成完整路由器归档、后端 ZIP 或外层校验附件。当前受支持的预构建部署主路径是文首的双容器直启模式。
 
 ## 必须先处理的安全事项
 
@@ -117,49 +83,19 @@ docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}'
 
 下文高级完整隔离路径优先使用 `docker compose`。如果只有 `docker-compose`，把后续命令中的 `docker compose` 替换成 `docker-compose`；两者都没有时可改用文首经过约束的 Docker 直接运行路径。
 
-### 2. 准备完整 ARM64 离线镜像
+### 2. 准备 ARM64 离线镜像
 
-Release 中的一键完整包为：
-
-```text
-kekeio-tab-router-arm64.tar.gz
-kekeio-tab-router-arm64.tar.gz.sha256
-```
-
-它包含：
-
-```text
-kekeio-tab:arm64
-caddy:2.11.4-alpine
-cloudflare/cloudflared:2026.7.3
-```
-
-如果不使用安装器而要手工检查包内镜像，执行：
-
-```sh
-sha256sum -c kekeio-tab-router-arm64.tar.gz.sha256
-tar -xzf kekeio-tab-router-arm64.tar.gz
-cd kekeio-tab-router-arm64
-sha256sum -c images.tar.sha256
-docker load -i images.tar
-docker image inspect kekeio-tab:arm64 --format '{{.Os}}/{{.Architecture}}'
-docker image inspect caddy:2.11.4-alpine --format '{{.Os}}/{{.Architecture}}'
-docker image inspect cloudflare/cloudflared:2026.7.3 --format '{{.Os}}/{{.Architecture}}'
-```
-
-三个结果都必须是 `linux/arm64`。
-
-当前直启包可用以下命令同时导入应用与构建时最新的 ARM64 cloudflared：
+Release 只提供一个 Docker 归档，可同时导入应用与构建时最新的 ARM64 cloudflared：
 
 ```sh
 docker load -i kekeio-tab-docker-arm64.tar
 ```
 
-该 tar 不包含 Caddy；需要 Caddy、固定 cloudflared 版本和完整隔离时应改用本节前面的 `kekeio-tab-router-arm64.tar.gz`，不要混用两套启动方式。
+该 tar 不包含 Caddy。若自行搭建高级隔离模式，需另外准备与本目录配置匹配的 Caddy 镜像；不要和文首双容器命令混用。
 
 ### 3. 准备目录和环境
 
-将后端 Release ZIP 的 `deploy/router` 目录复制到路由器，例如：
+从仓库源码中把 `backend/deploy/router` 目录复制到路由器，例如：
 
 ```text
 /mnt/usb-24aeefbb/mi_docker/tab/deploy/router
@@ -351,21 +287,14 @@ https://<KEKEIO_ADMIN_HOST>:8443/install
 https://192.168.50.1:8443/install
 ```
 
-首次启动的一次性安装码位于后端日志和数据目录：
-
-```sh
-docker compose -p kekeio-tab \
-  --env-file .env \
-  -f compose.yaml \
-  -f compose.tunnel-simpledocker.yaml \
-  logs backend
-```
+从允许的局域网打开安装入口后，页面会自动建立受 Cookie、CSRF、来源与过期时间保护的安装会话，不生成或要求一次性安装码。
 
 安装向导中：
 
 - 公网 URL 填 `https://tab.kekeio.com`，不附加 `:9009`、`:8443` 或 `:18081`。
 - 允许来源填精确的 `chrome-extension://<扩展ID>`。
 - 备份目录填 `/backups`。
+- 管理员密码至少填写 4 个 Unicode 字符。
 - 必须完成 SMTP 测试；失败时先检查容器 DNS、TCP 出网和系统时间。
 
 安装前 `/health/ready` 返回 503 是正常门禁；安装完成后必须变成 200。
@@ -437,7 +366,7 @@ docker inspect cloudflared-tab --format '{{json .Config.Cmd}}'
 1. 在后台创建一份完整备份并保存恢复口令。
 2. 把备份复制到第二介质或离机存储。
 3. 记录三个镜像的 ID 和 RepoDigest。
-4. 保留当前与上一版完整 ARM64 一键包及 `.sha256`。
+4. 保留当前与上一版 `kekeio-tab-docker-arm64.tar`。
 
 ```sh
 docker image inspect kekeio-tab:arm64 --format '{{.Id}} {{json .RepoDigests}}'
@@ -445,13 +374,7 @@ docker image inspect caddy:2.11.4-alpine --format '{{.Id}} {{json .RepoDigests}}
 docker image inspect cloudflare/cloudflared:2026.7.3 --format '{{.Id}} {{json .RepoDigests}}'
 ```
 
-一键安装器管理的部署直接上传新包并重新运行：
-
-```sh
-tar -xzf kekeio-tab-router-arm64.tar.gz && sh kekeio-tab-router-arm64/install.sh
-```
-
-高级手工 Compose 部署仍按原 `.env` 和两份 Compose 文件重建。
+双容器直启模式上传新 `kekeio-tab-docker-arm64.tar`，重新执行 `docker load`，然后按文首顺序重建应用与 cloudflared。高级手工 Compose 部署仍按原 `.env` 和两份 Compose 文件重建。
 
 不要同时运行两个后端实例访问同一个 SQLite 数据目录。若新版本迁移了数据库，二进制回滚前必须恢复与旧版本兼容的迁移前快照或完整备份。
 

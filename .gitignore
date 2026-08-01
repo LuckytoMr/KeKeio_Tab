@@ -14,7 +14,6 @@ backups/
 *.pre-restore-*
 *.restore-intent.json*
 secrets.json
-install-code
 cloudflare-tunnel-token
 cloudflared-token
 cloudflared.env

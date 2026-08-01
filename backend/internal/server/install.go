@@ -13,12 +13,15 @@ import (
 	"net/http"
 	"net/mail"
 	"net/url"
-	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
-const smtpVerificationTTL = 30 * time.Minute
+const (
+	smtpVerificationTTL        = 30 * time.Minute
+	minimumAdminPasswordLength = 4
+)
 
 type AdminUser struct {
 	ID          string `json:"id"`
@@ -258,7 +261,7 @@ func (s *Store) CommitInstallation(ctx context.Context, input InstallationInput)
 func (s *Store) applyInstallation(ctx context.Context, input InstallationInput, finalState string, closeInstallSessions bool) (AdminUser, error) {
 	input.Email = normalizeEmail(input.Email)
 	input.DisplayName = strings.TrimSpace(input.DisplayName)
-	if !validEmail(input.Email) || input.DisplayName == "" || len(input.Password) < 12 {
+	if !validEmail(input.Email) || input.DisplayName == "" || utf8.RuneCountInString(input.Password) < minimumAdminPasswordLength {
 		return AdminUser{}, fmt.Errorf("invalid administrator details")
 	}
 	state, err := s.InstallationState(ctx)
@@ -623,14 +626,12 @@ func (a *App) handleInstallStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleInstallSession(w http.ResponseWriter, r *http.Request) {
-	var input struct {
-		InstallCode string `json:"installCode"`
-	}
-	if !a.decodeJSON(w, r, &input) {
+	if !a.originAllowed(r) {
+		writeAPIError(w, http.StatusForbidden, "ORIGIN_REJECTED", "请求来源无效")
 		return
 	}
-	if len(a.config.InstallCode) < 32 || subtle.ConstantTimeCompare([]byte(input.InstallCode), []byte(a.config.InstallCode)) != 1 {
-		writeAPIError(w, http.StatusUnauthorized, "INVALID_INSTALL_CODE", "安装码无效")
+	var input struct{}
+	if !a.decodeJSON(w, r, &input) {
 		return
 	}
 	token, csrf, expiresAt, err := a.store.CreateInstallSession(r.Context(), 30*time.Minute, 2*time.Hour)
@@ -666,7 +667,7 @@ func (a *App) handleInstallPreflight(w http.ResponseWriter, r *http.Request) {
 	}
 	cookie, err := r.Cookie(a.config.InstallCookieName)
 	if err != nil || a.store.ValidateInstallSession(r.Context(), cookie.Value, r.Header.Get("X-CSRF-Token")) != nil {
-		writeAPIError(w, http.StatusUnauthorized, "INSTALL_SESSION_EXPIRED", "安装会话已失效，请重新输入一次性安装码")
+		writeAPIError(w, http.StatusUnauthorized, "INSTALL_SESSION_EXPIRED", "安装会话已失效，请重新开始安装流程")
 		return
 	}
 	writeAPIData(w, http.StatusOK, map[string]any{
@@ -690,7 +691,7 @@ func (a *App) handleInstallSMTPTest(w http.ResponseWriter, r *http.Request) {
 	}
 	cookie, err := r.Cookie(a.config.InstallCookieName)
 	if err != nil || a.store.ValidateInstallSession(r.Context(), cookie.Value, r.Header.Get("X-CSRF-Token")) != nil {
-		writeAPIError(w, http.StatusUnauthorized, "INSTALL_SESSION_EXPIRED", "安装会话已失效，请重新输入一次性安装码")
+		writeAPIError(w, http.StatusUnauthorized, "INSTALL_SESSION_EXPIRED", "安装会话已失效，请重新开始安装流程")
 		return
 	}
 	var input SMTPTestInput
@@ -711,7 +712,7 @@ func (a *App) handleInstallSMTPTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.store.MarkInstallSMTPVerified(r.Context(), cookie.Value, verificationHash); err != nil {
-		writeAPIError(w, http.StatusUnauthorized, "INSTALL_SESSION_EXPIRED", "安装会话已失效，请重新输入一次性安装码")
+		writeAPIError(w, http.StatusUnauthorized, "INSTALL_SESSION_EXPIRED", "安装会话已失效，请重新开始安装流程")
 		return
 	}
 	writeAPIData(w, http.StatusOK, map[string]bool{"verified": true})
@@ -724,7 +725,7 @@ func (a *App) handleInstallComplete(w http.ResponseWriter, r *http.Request) {
 	}
 	cookie, err := r.Cookie(a.config.InstallCookieName)
 	if err != nil || a.store.ValidateInstallSession(r.Context(), cookie.Value, r.Header.Get("X-CSRF-Token")) != nil {
-		writeAPIError(w, http.StatusUnauthorized, "INSTALL_SESSION_EXPIRED", "安装会话已失效，请重新输入一次性安装码")
+		writeAPIError(w, http.StatusUnauthorized, "INSTALL_SESSION_EXPIRED", "安装会话已失效，请重新开始安装流程")
 		return
 	}
 	var payload struct {
@@ -857,12 +858,6 @@ func (a *App) handleInstallComplete(w http.ResponseWriter, r *http.Request) {
 		a.applyRuntimeSettings(preservedRuntime, preservedSMTPPassword)
 	} else {
 		a.applyInstalledRuntime(input, smtpPassword)
-	}
-	if a.config.InstallCodePath != "" {
-		if err := os.Remove(a.config.InstallCodePath); err != nil && !os.IsNotExist(err) {
-			writeAPIError(w, http.StatusInternalServerError, "INSTALL_CODE_CLEANUP_FAILED", "安装已完成，但安装码清理失败")
-			return
-		}
 	}
 	writeAPIData(w, http.StatusCreated, admin)
 }

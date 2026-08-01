@@ -60,6 +60,7 @@ export function App({ client = apiClient }: { client?: ApiClient }) {
     if (typeof client.onUnauthorized !== "function") return;
     return client.onUnauthorized(() => {
       const current = parseAdminLocation(window.location.href);
+      if (current.page === "install") return;
       const destination = current.page === "login" ? "/admin/login" : loginHref(routeHref(current));
       client.setCsrfToken(null);
       setSession(null);

@@ -74,6 +74,7 @@ $directDockerText = Get-Content -LiteralPath (Join-Path $root "docker命令.txt"
 $directTunnelEnvExample = Get-Content -LiteralPath (Join-Path $routerDeployRoot "cloudflared.env.example") -Raw
 $dockerEntrypointText = Get-Content -LiteralPath (Join-Path $root "backend\docker-entrypoint.sh") -Raw
 $publishWorkflowText = Get-Content -LiteralPath (Join-Path $root ".github\workflows\publish.yml") -Raw
+$productPolicyText = Get-Content -LiteralPath (Join-Path $root "AGENTS.md") -Raw
 
 Assert-Absent -Name "生产后端不得内置固定管理员口令" -Text $backendText -Pattern '(?i)fixedAdminPassword|ensureFixedAdmin|2231'
 Assert-Present -Name "本地 dev 命令必须显式标注固定测试口令" -Text $serverCommandText -Pattern 'const\s+localDevelopmentPassword\s*=\s*"2231"'
@@ -82,7 +83,17 @@ Assert-Present -Name "本地 dev 命令必须保持开发模式隔离" -Text $se
 Assert-Absent -Name "CORS 不得放行任意扩展 ID" -Text $backendText -Pattern 'HasPrefix\s*\(\s*origin\s*,\s*"chrome-extension://"'
 Assert-Present -Name "后端必须提供版本化同步端点" -Text $backendText -Pattern '/api/v1/sync/profile'
 Assert-Present -Name "后端必须提供同步历史恢复端点" -Text $backendText -Pattern '/api/v1/sync/profile/versions'
-Assert-Present -Name "后端必须支持一次性安装码" -Text $backendText -Pattern 'FULLPRO_INSTALL_CODE|InstallCode'
+Assert-Absent -Name "生产后端不得生成或校验一次性安装码" -Text ($backendText + "`n" + $serverCommandText) -Pattern 'FULLPRO_INSTALL_CODE|InstallCode|install-code'
+Assert-Absent -Name "管理端不得显示一次性安装码步骤" -Text $adminText -Pattern '一次性安装码|验证安装码|installCode'
+Assert-Present -Name "无安装码会话仍必须经过管理网段与认证限流" -Text $backendText -Pattern 'POST /install/api/v1/session"\s*,\s*a\.requireAdminNetwork\(a\.withAuthRateLimit\(a\.handleInstallSession\)\)'
+Assert-Present -Name "无安装码会话仍必须限制请求来源" -Text $backendText -Pattern 'handleInstallSession[\s\S]{0,1000}originAllowed\(r\)[\s\S]{0,1000}CreateInstallSession'
+Assert-Present -Name "安装会话仍必须使用 Strict SameSite Cookie" -Text $backendText -Pattern 'InstallCookieName[\s\S]{0,600}SameSite:\s*http\.SameSiteStrictMode'
+Assert-Present -Name "管理员密码最低字符数必须固定为 4" -Text $backendText -Pattern 'minimumAdminPasswordLength\s*=\s*4'
+Assert-Present -Name "后端管理员密码必须按 Unicode 字符计数" -Text $backendText -Pattern 'utf8\.RuneCountInString\(input\.Password\)'
+Assert-Present -Name "管理端管理员密码最低字符数必须固定为 4" -Text $adminText -Pattern 'minimumAdminPasswordLength\s*=\s*4'
+Assert-Present -Name "管理端管理员密码必须按 Unicode 字符计数" -Text $adminText -Pattern 'Array\.from\(draft\.password\)\.length'
+Assert-Present -Name "项目规则必须锁定无安装码安装" -Text $productPolicyText -Pattern '首次安装和管理员重置不使用一次性安装码'
+Assert-Present -Name "项目规则必须锁定管理员密码 4 个 Unicode 字符" -Text $productPolicyText -Pattern '最低长度固定为 \*\*4 个 Unicode 字符\*\*'
 Assert-Present -Name "后端必须发送 CSP" -Text $backendText -Pattern 'Content-Security-Policy'
 Assert-Present -Name "后端必须发送 nosniff" -Text $backendText -Pattern 'X-Content-Type-Options'
 Assert-Present -Name "同步写入必须执行版本前置条件" -Text $backendText -Pattern 'BaseVersion|baseVersion'
@@ -130,6 +141,17 @@ Assert-Present -Name "生产入口必须把 LAN HTTP 显式开关传入服务配
 Assert-Absent -Name "CI 不得重新消耗 Actions Artifact 配额" -Text $publishWorkflowText -Pattern 'actions/upload-artifact'
 Assert-Present -Name "main 构建必须覆盖滚动 Release" -Text $publishWorkflowText -Pattern 'release_tag="main-latest"'
 Assert-Present -Name "CI 必须在 Actions 摘要提供下载链接" -Text $publishWorkflowText -Pattern 'GITHUB_STEP_SUMMARY'
+Assert-Present -Name "CI 必须关闭 Docker 构建记录上传" -Text $publishWorkflowText -Pattern "DOCKER_BUILD_RECORD_UPLOAD:\s*'false'"
+Assert-Present -Name "CI 必须关闭 Docker 构建摘要" -Text $publishWorkflowText -Pattern "DOCKER_BUILD_SUMMARY:\s*'false'"
+Assert-Present -Name "CI 必须发布浏览器扩展 ZIP" -Text $publishWorkflowText -Pattern 'release/kekeio-tab-extension\.zip'
+Assert-Present -Name "CI 必须发布 ARM64 Docker tar" -Text $publishWorkflowText -Pattern 'release/kekeio-tab-docker-arm64\.tar'
+Assert-Present -Name "CI 必须清理旧 Release 资产" -Text $publishWorkflowText -Pattern 'gh\s+release\s+delete-asset'
+Assert-Present -Name "CI 必须校验固定的两个发布资产" -Text $publishWorkflowText -Pattern 'expected_assets=\(kekeio-tab-docker-arm64\.tar kekeio-tab-extension\.zip\)'
+Assert-Absent -Name "CI 不得发布后端 ZIP" -Text $publishWorkflowText -Pattern 'kekeio-tab-backend\.zip'
+Assert-Absent -Name "CI 不得发布 SimpleDocker 外层 ZIP" -Text $publishWorkflowText -Pattern 'kekeio-tab-simpledocker-arm64\.zip'
+Assert-Absent -Name "CI 不得发布完整路由器归档" -Text $publishWorkflowText -Pattern 'kekeio-tab-router-arm64\.tar\.gz'
+Assert-Absent -Name "CI 不得发布外层 SHA256 附件" -Text $publishWorkflowText -Pattern '\.sha256'
+Assert-Absent -Name "CI 不得构建或推送 GHCR" -Text $publishWorkflowText -Pattern 'ghcr\.io|docker/login-action|packages:\s*write|Publish GHCR'
 
 Assert-Absent -Name "后台源码不得使用 innerHTML" -Text $adminText -Pattern '(?i)\.innerHTML\s*='
 $requiredHosts = @($manifest.host_permissions)

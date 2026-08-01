@@ -53,12 +53,15 @@ describe("LoginPage", () => {
 describe("InstallWizard", () => {
   it("starts a fresh install with the KeKeIO Tab public URL", async () => {
     const client = clientStub({
-      get: vi.fn().mockResolvedValue({ state: "uninitialized", mode: "fresh_install", requiresCode: true })
+      get: vi.fn().mockResolvedValue({ state: "uninitialized" }),
+      post: vi.fn().mockResolvedValue({ mode: "fresh_install", csrfToken: "csrf-install" })
     });
 
     render(<InstallWizard client={client} onInstalled={vi.fn()} />);
 
-    await screen.findByRole("heading", { name: "验证安装码" });
+    await screen.findByRole("heading", { name: "环境检查" });
+    expect(client.post).toHaveBeenCalledWith("/install/api/v1/session", {});
+    expect(screen.queryByText(/安装码/)).not.toBeInTheDocument();
     await waitFor(() => {
       const progress = JSON.parse(window.sessionStorage.getItem("fullpro:install:draft") || "{}");
       expect(progress.draft?.publicBaseUrl).toBe("https://tab.kekeio.com");
@@ -81,14 +84,12 @@ describe("InstallWizard", () => {
       return Promise.reject(new Error(`unexpected POST ${path}`));
     });
     const client = clientStub({
-      get: vi.fn().mockResolvedValue({ state: "uninitialized", mode: "fresh_install", requiresCode: true }),
+      get: vi.fn().mockResolvedValue({ state: "uninitialized" }),
       post: post as unknown as ApiClient["post"]
     });
     const user = userEvent.setup();
     render(<InstallWizard client={client} onInstalled={vi.fn()} />);
 
-    await user.type(await screen.findByLabelText("一次性安装码"), "ABCD-EFGH");
-    await user.click(screen.getByRole("button", { name: "建立安全安装会话" }));
     await user.click(await screen.findByRole("button", { name: "运行环境检查" }));
     await user.click(await screen.findByRole("button", { name: "继续" }));
     await user.type(screen.getByLabelText("管理员邮箱"), "admin@kekeio.com");
@@ -121,12 +122,13 @@ describe("InstallWizard", () => {
       maxUsers: "100", profileKiB: "512", storageGiB: "1", versionsPerUser: "50", accessLogDays: "30", auditLogDays: "180", backupDirectory: "/backups"
     }, 0));
     const client = clientStub({
-      get: vi.fn().mockResolvedValue({ state: "uninitialized", mode: "fresh_install", requiresCode: true })
+      get: vi.fn().mockResolvedValue({ state: "uninitialized" }),
+      post: vi.fn().mockResolvedValue({ mode: "fresh_install", csrfToken: "csrf-install" })
     });
 
     render(<InstallWizard client={client} onInstalled={vi.fn()} />);
 
-    await screen.findByRole("heading", { name: "验证安装码" });
+    await screen.findByRole("heading", { name: "环境检查" });
     await waitFor(() => {
       const progress = JSON.parse(window.sessionStorage.getItem("fullpro:install:draft") || "{}");
       expect(progress.draft?.publicBaseUrl).toBe("https://tab.kekeio.com");
@@ -153,6 +155,20 @@ describe("InstallWizard", () => {
       publicBaseUrl: "请输入绝对 HTTPS 公网 API 地址"
     });
     expect(validateInstallStepInput("公网 API", draft, "admin_reset", false, true)).toEqual({});
+  });
+
+  it("requires exactly the fixed four-character minimum for administrator passwords", () => {
+    const baseDraft = JSON.parse(serializeInstallProgress({
+      adminEmail: "admin@example.com", displayName: "管理员", password: "", passwordConfirm: "",
+      publicBaseUrl: "https://tab.kekeio.com", extensionIds: "", webOrigins: "", registrationEnabled: false,
+      smtpHost: "", smtpPort: "587", smtpTls: "starttls", smtpFrom: "", smtpUser: "", smtpPassword: "",
+      maxUsers: "100", profileKiB: "512", storageGiB: "1", versionsPerUser: "50", accessLogDays: "30", auditLogDays: "180", backupDirectory: "/backups"
+    }, 0)).draft;
+
+    expect(validateInstallStepInput("管理员账号", { ...baseDraft, password: "三字呀", passwordConfirm: "三字呀" }, "fresh_install", true, false)).toEqual({
+      adminPassword: "管理员密码至少 4 位"
+    });
+    expect(validateInstallStepInput("管理员账号", { ...baseDraft, password: "四字可以", passwordConfirm: "四字可以" }, "fresh_install", true, false)).toEqual({});
   });
 
   it("persists only the resumable non-sensitive draft and current step", () => {
@@ -189,28 +205,78 @@ describe("InstallWizard", () => {
     });
     expect(serialized).not.toContain("ADMIN-SECRET-123");
     expect(serialized).not.toContain("SMTP-SECRET-456");
-    expect(serialized).not.toContain("installCode");
     expect(serialized).not.toContain("csrf");
     expect(JSON.parse(serialized).draft.publicBaseUrl).toBe("https://fullpro.example.com");
   });
 
-  it("treats the install code session as the first explicit step", async () => {
+  it("automatically establishes a LAN install session and applies its CSRF token", async () => {
     const client = clientStub({
-      get: vi.fn().mockResolvedValue({ state: "uninitialized", mode: "fresh_install", requiresCode: true }),
+      get: vi.fn().mockResolvedValue({ state: "uninitialized" }),
       post: vi.fn().mockResolvedValue({ mode: "fresh_install", csrfToken: "csrf-install", expiresAt: "2026-07-12T10:00:00Z" })
     });
-    const user = userEvent.setup();
     render(<InstallWizard client={client} onInstalled={vi.fn()} />);
 
-    expect(await screen.findByRole("heading", { name: "验证安装码" })).toBeInTheDocument();
-    await user.type(screen.getByLabelText("一次性安装码"), "ABCD-EFGH-IJKL");
-    await user.click(screen.getByRole("button", { name: "建立安全安装会话" }));
-
-    expect(client.post).toHaveBeenCalledWith("/install/api/v1/session", { installCode: "ABCD-EFGH-IJKL" });
+    expect(await screen.findByRole("heading", { name: "环境检查" })).toBeInTheDocument();
+    expect(client.post).toHaveBeenCalledWith("/install/api/v1/session", {});
     await waitFor(() => expect(screen.getByRole("heading", { name: "环境检查" })).toBeInTheDocument());
     expect(screen.getByText("KeKeIO Tab")).toBeInTheDocument();
     expect(screen.getByText("KT")).toBeInTheDocument();
     expect(client.setCsrfToken).toHaveBeenCalledWith("csrf-install");
+  });
+
+  it("shows a loading state while the automatic LAN session is being established", async () => {
+    let resolveSession!: (value: { mode: "fresh_install"; csrfToken: string }) => void;
+    const pendingSession = new Promise<{ mode: "fresh_install"; csrfToken: string }>((resolve) => { resolveSession = resolve; });
+    const client = clientStub({
+      get: vi.fn().mockResolvedValue({ state: "uninitialized" }),
+      post: vi.fn().mockReturnValue(pendingSession)
+    });
+    render(<InstallWizard client={client} onInstalled={vi.fn()} />);
+
+    expect(await screen.findByRole("heading", { name: "正在建立安装会话" })).toBeInTheDocument();
+    expect(screen.queryByText(/安装码/)).not.toBeInTheDocument();
+    resolveSession({ mode: "fresh_install", csrfToken: "csrf-install" });
+
+    expect(await screen.findByRole("heading", { name: "环境检查" })).toBeInTheDocument();
+  });
+
+  it("offers a retry when automatic session creation fails", async () => {
+    const post = vi.fn()
+      .mockRejectedValueOnce(new ApiError({ status: 503, code: "SESSION_UNAVAILABLE", message: "暂时无法建立安装会话" }))
+      .mockResolvedValueOnce({ mode: "fresh_install", csrfToken: "csrf-install" });
+    const get = vi.fn().mockResolvedValue({ state: "uninitialized" });
+    const client = clientStub({ get, post });
+    const user = userEvent.setup();
+    render(<InstallWizard client={client} onInstalled={vi.fn()} />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("暂时无法建立安装会话");
+    await user.click(screen.getByRole("button", { name: "重试" }));
+
+    expect(await screen.findByRole("heading", { name: "环境检查" })).toBeInTheDocument();
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(post).toHaveBeenCalledTimes(2);
+  });
+
+  it("automatically starts the shorter administrator-reset flow", async () => {
+    const client = clientStub({
+      get: vi.fn().mockResolvedValue({ state: "requires_admin_reset" }),
+      post: vi.fn().mockResolvedValue({ mode: "admin_reset", csrfToken: "csrf-reset" })
+    });
+    render(<InstallWizard client={client} onInstalled={vi.fn()} />);
+
+    expect(await screen.findByRole("heading", { name: "环境检查" })).toBeInTheDocument();
+    expect(screen.getByText("管理员重置")).toBeInTheDocument();
+    expect(screen.getByText("步骤 1 / 3")).toBeInTheDocument();
+    expect(client.post).toHaveBeenCalledWith("/install/api/v1/session", {});
+  });
+
+  it("redirects an already installed service without creating an install session", async () => {
+    const onInstalled = vi.fn();
+    const post = vi.fn();
+    render(<InstallWizard client={clientStub({ get: vi.fn().mockResolvedValue({ state: "installed" }), post })} onInstalled={onInstalled} />);
+
+    await waitFor(() => expect(onInstalled).toHaveBeenCalledTimes(1));
+    expect(post).not.toHaveBeenCalled();
   });
 
   it("preserves draft fields but restarts safety checks for every new install session", async () => {
@@ -221,14 +287,10 @@ describe("InstallWizard", () => {
       maxUsers: "100", profileKiB: "512", storageGiB: "1", versionsPerUser: "50", accessLogDays: "30", auditLogDays: "180", backupDirectory: "/backups"
     }, 5));
     const client = clientStub({
-      get: vi.fn().mockResolvedValue({ state: "uninitialized", mode: "fresh_install", requiresCode: true }),
+      get: vi.fn().mockResolvedValue({ state: "uninitialized" }),
       post: vi.fn().mockResolvedValue({ mode: "fresh_install", csrfToken: "csrf-install" })
     });
-    const user = userEvent.setup();
     render(<InstallWizard client={client} onInstalled={vi.fn()} />);
-
-    await user.type(await screen.findByLabelText("一次性安装码"), "ABCD-EFGH");
-    await user.click(screen.getByRole("button", { name: "建立安全安装会话" }));
 
     expect(await screen.findByRole("heading", { name: "环境检查" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "确认并完成安装" })).not.toBeInTheDocument();
@@ -236,25 +298,25 @@ describe("InstallWizard", () => {
     expect(JSON.parse(window.sessionStorage.getItem("fullpro:install:draft") || "{}").draft?.publicBaseUrl).toBe("https://fullpro.example.com");
   });
 
-  it("clears an expired install session and returns to install-code verification", async () => {
+  it("automatically replaces an expired install session and restarts safety checks", async () => {
     const post = vi
       .fn()
       .mockResolvedValueOnce({ mode: "fresh_install", csrfToken: "csrf-install" })
-      .mockRejectedValueOnce(new ApiError({ status: 401, code: "INSTALL_SESSION_EXPIRED", message: "安装会话已过期" }));
+      .mockRejectedValueOnce(new ApiError({ status: 401, code: "INSTALL_SESSION_EXPIRED", message: "安装会话已过期" }))
+      .mockResolvedValueOnce({ mode: "fresh_install", csrfToken: "csrf-recovered" });
     const client = clientStub({
-      get: vi.fn().mockResolvedValue({ state: "uninitialized", mode: "fresh_install", requiresCode: true }),
+      get: vi.fn().mockResolvedValue({ state: "uninitialized" }),
       post
     });
     const user = userEvent.setup();
     render(<InstallWizard client={client} onInstalled={vi.fn()} />);
 
-    await user.type(await screen.findByLabelText("一次性安装码"), "ABCD-EFGH");
-    await user.click(screen.getByRole("button", { name: "建立安全安装会话" }));
     await user.click(await screen.findByRole("button", { name: "运行环境检查" }));
 
-    expect(await screen.findByRole("heading", { name: "验证安装码" })).toBeInTheDocument();
-    expect(screen.getByRole("alert", { name: "请修正以下问题" })).toHaveTextContent("安装会话已过期");
-    expect(client.setCsrfToken).toHaveBeenLastCalledWith(null);
+    await waitFor(() => expect(client.setCsrfToken).toHaveBeenLastCalledWith("csrf-recovered"));
+    expect(await screen.findByRole("heading", { name: "环境检查" })).toBeInTheDocument();
+    expect(screen.getByRole("alert", { name: "请修正以下问题" })).toHaveTextContent("已自动建立新会话");
+    expect(post).toHaveBeenLastCalledWith("/install/api/v1/session", {});
   });
 
   it("applies a QQ SMTP preset without clearing account credentials", async () => {
@@ -270,14 +332,12 @@ describe("InstallWizard", () => {
       return Promise.reject(new Error(`unexpected POST ${path}`));
     });
     const client = clientStub({
-      get: vi.fn().mockResolvedValue({ state: "uninitialized", mode: "fresh_install", requiresCode: true }),
+      get: vi.fn().mockResolvedValue({ state: "uninitialized" }),
       post: post as unknown as ApiClient["post"]
     });
     const user = userEvent.setup();
     render(<InstallWizard client={client} onInstalled={vi.fn()} />);
 
-    await user.type(await screen.findByLabelText("一次性安装码"), "ABCD-EFGH");
-    await user.click(screen.getByRole("button", { name: "建立安全安装会话" }));
     await user.click(await screen.findByRole("button", { name: "运行环境检查" }));
     await user.click(await screen.findByRole("button", { name: "继续" }));
     await user.type(screen.getByLabelText("密码"), "correct horse battery staple");
@@ -315,14 +375,12 @@ describe("InstallWizard", () => {
       return Promise.reject(new Error(`unexpected POST ${path}`));
     });
     const client = clientStub({
-      get: vi.fn().mockResolvedValue({ state: "uninitialized", mode: "fresh_install", requiresCode: true }),
+      get: vi.fn().mockResolvedValue({ state: "uninitialized" }),
       post: post as unknown as ApiClient["post"]
     });
     const user = userEvent.setup();
     render(<InstallWizard client={client} onInstalled={vi.fn()} />);
 
-    await user.type(await screen.findByLabelText("一次性安装码"), "ABCD-EFGH");
-    await user.click(screen.getByRole("button", { name: "建立安全安装会话" }));
     await user.click(await screen.findByRole("button", { name: "运行环境检查" }));
     await user.click(await screen.findByRole("button", { name: "继续" }));
     await user.type(screen.getByLabelText("密码"), "correct horse battery staple");
@@ -354,14 +412,12 @@ describe("InstallWizard", () => {
       return Promise.reject(new Error(`unexpected POST ${path}`));
     });
     const client = clientStub({
-      get: vi.fn().mockResolvedValue({ state: "uninitialized", mode: "fresh_install", requiresCode: true }),
+      get: vi.fn().mockResolvedValue({ state: "uninitialized" }),
       post: post as unknown as ApiClient["post"]
     });
     const user = userEvent.setup();
     render(<InstallWizard client={client} onInstalled={vi.fn()} />);
 
-    await user.type(await screen.findByLabelText("一次性安装码"), "ABCD-EFGH");
-    await user.click(screen.getByRole("button", { name: "建立安全安装会话" }));
     await user.click(await screen.findByRole("button", { name: "运行环境检查" }));
     await user.click(await screen.findByRole("button", { name: "继续" }));
     await user.type(screen.getByLabelText("密码"), "correct horse battery staple");

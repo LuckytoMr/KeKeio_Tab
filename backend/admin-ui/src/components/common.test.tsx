@@ -8,7 +8,7 @@ describe("accessible feedback components", () => {
   it("focuses a form error summary and links errors to their fields", async () => {
     render(
       <>
-        <FormErrorSummary errors={{ email: "请输入管理员邮箱", password: "密码至少 12 位" }} focusOnMount />
+        <FormErrorSummary errors={{ email: "请输入管理员邮箱", password: "密码至少 4 位" }} focusOnMount />
         <input id="email" />
         <input id="password" />
       </>

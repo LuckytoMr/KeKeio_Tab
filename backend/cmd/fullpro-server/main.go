@@ -56,10 +56,6 @@ func main() {
 	if err := store.SetBackupDirectoryOverride(os.Getenv("FULLPRO_BACKUP_DIRECTORY")); err != nil {
 		log.Fatalf("configure backup directory: %v", err)
 	}
-	state, err := store.InstallationState(context.Background())
-	if err != nil {
-		log.Fatalf("read installation state: %v", err)
-	}
 	secrets, _, err := server.LoadOrCreateSecrets(secretsPath)
 	if err != nil {
 		log.Fatalf("load secrets: %v", err)
@@ -68,21 +64,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("load runtime settings: %v", err)
 	}
-	installCodePath := env("FULLPRO_INSTALL_CODE_FILE", filepath.Join(dataDir, "install-code"))
-	installCode, installCodeCreated, err := server.EnsureInstallCode(installCodePath, os.Getenv("FULLPRO_INSTALL_CODE"), state)
-	if err != nil {
-		log.Fatalf("prepare install code: %v", err)
-	}
-	if installCodeCreated {
-		log.Printf("one-time installation code: %s (also stored at %s)", installCode, installCodePath)
-	}
-
 	baseConfig := server.Config{
 		Addr:                    addr,
 		CookieName:              env("FULLPRO_COOKIE_NAME", "fullpro_session"),
 		InstallCookieName:       env("FULLPRO_INSTALL_COOKIE_NAME", "fullpro_install"),
-		InstallCode:             installCode,
-		InstallCodePath:         installCodePath,
 		CookieSecure:            cookieSecure,
 		TokenDerivationKey:      secrets.TokenDerivationKey,
 		SecretsPath:             secretsPath,
@@ -360,12 +345,7 @@ func runAdminReset() error {
 	if err := store.RequireAdminReset(context.Background()); err != nil {
 		return err
 	}
-	codePath := env("FULLPRO_INSTALL_CODE_FILE", filepath.Join(filepath.Dir(dbPath), "install-code"))
-	code, _, err := server.EnsureInstallCode(codePath, os.Getenv("FULLPRO_INSTALL_CODE"), "requires_admin_reset")
-	if err != nil {
-		return fmt.Errorf("prepare one-time reset code: %w", err)
-	}
-	log.Printf("administrator recovery enabled; one-time reset code: %s (also stored at %s)", code, codePath)
+	log.Printf("administrator recovery enabled; continue from an allowed administrator network")
 	return nil
 }
 
