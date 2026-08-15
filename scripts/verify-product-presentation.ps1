@@ -98,9 +98,20 @@ if (-not (Test-Path -LiteralPath $previewPath -PathType Leaf)) {
     $failures.Add("README 效果图为空：$previewRelativePath")
 }
 
-foreach ($publicEntry in @("CONTRIBUTING.md", "SECURITY.md")) {
+foreach ($publicEntry in @("CONTRIBUTING.md", "SECURITY.md", "LICENSE")) {
     if (-not (Test-Path -LiteralPath (Join-Path $root $publicEntry) -PathType Leaf)) {
         $failures.Add("公开维护入口缺失：$publicEntry")
+    }
+}
+
+$licensePath = Join-Path $root "LICENSE"
+if (Test-Path -LiteralPath $licensePath -PathType Leaf) {
+    $licenseText = Get-Content -LiteralPath $licensePath -Raw
+    if (-not $licenseText.StartsWith("MIT License", [StringComparison]::Ordinal)) {
+        $failures.Add("LICENSE 必须使用标准 MIT License 文本")
+    }
+    if (-not $readmeText.Contains("[MIT License](LICENSE)", [StringComparison]::Ordinal)) {
+        $failures.Add("README 必须链接 MIT License")
     }
 }
 

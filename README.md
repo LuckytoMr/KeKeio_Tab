@@ -3,6 +3,7 @@
 [![验证与发布](https://github.com/LuckytoMr/KeKeio_Tab/actions/workflows/publish.yml/badge.svg?branch=main)](https://github.com/LuckytoMr/KeKeio_Tab/actions/workflows/publish.yml)
 [![最新版本](https://img.shields.io/github/v/release/LuckytoMr/KeKeio_Tab?display_name=tag&sort=semver)](https://github.com/LuckytoMr/KeKeio_Tab/releases/latest)
 [![main 最新构建](https://img.shields.io/badge/下载-main--latest-0969da)](https://github.com/LuckytoMr/KeKeio_Tab/releases/tag/main-latest)
+[![MIT 许可证](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 kekeio 是一个本地优先、可自托管的新标签页项目：浏览器扩展负责搜索、快捷方式、分组和壁纸体验；可选的 Go 后端负责账号、配置同步、备份与管理。个人用户可以只使用扩展，也可以在私人 NAS 或 ARM64 路由器上用 Docker 部署后端，并通过 HTTPS 域名让自己的设备在外网访问同步服务。
 
@@ -98,6 +99,10 @@ docker load -i kekeio-tab-docker-arm64.tar
 - Bug 报告应包含版本、复现步骤、期望行为和已脱敏日志。
 - Pull Request 必须说明影响范围，并通过 `scripts/verify-all.ps1`。
 - 真实密码、Cookie、Token、私钥、数据库或私人备份不得进入 Issue、PR、截图和提交历史。
+
+## 开源许可
+
+本项目根据 [MIT License](LICENSE) 开源。你可以使用、修改、分发和再授权本项目，但必须在软件副本或重要部分中保留版权声明和许可声明。
 
 ## 发布
 
