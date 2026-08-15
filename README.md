@@ -1,81 +1,111 @@
 # kekeio
 
-kekeio 是一个本地优先的新标签页扩展，配套单机自托管同步后端、管理员工作台、发布管理、审计和加密备份恢复能力。
+[![验证与发布](https://github.com/LuckytoMr/KeKeio_Tab/actions/workflows/publish.yml/badge.svg?branch=main)](https://github.com/LuckytoMr/KeKeio_Tab/actions/workflows/publish.yml)
+[![最新版本](https://img.shields.io/github/v/release/LuckytoMr/KeKeio_Tab?display_name=tag&sort=semver)](https://github.com/LuckytoMr/KeKeio_Tab/releases/latest)
+[![main 最新构建](https://img.shields.io/badge/下载-main--latest-0969da)](https://github.com/LuckytoMr/KeKeio_Tab/releases/tag/main-latest)
 
-## 加载浏览器扩展
+kekeio 是一个本地优先、可自托管的新标签页项目：浏览器扩展负责搜索、快捷方式、分组和壁纸体验；可选的 Go 后端负责账号、配置同步、备份与管理。个人用户可以只使用扩展，也可以在私人 NAS 或 ARM64 路由器上用 Docker 部署后端，并通过 HTTPS 域名让自己的设备在外网访问同步服务。
 
-不要点击 Chrome 页面的“加载未打包的扩展程序”后选择 ZIP 文件。
+<p align="center">
+  <img src="docs/images/kekeio-tab-preview.webp" alt="kekeio 新标签页效果图：自定义壁纸、搜索框、快捷方式和侧边工具栏" width="100%">
+</p>
 
-1. 打开 `chrome://extensions`，并保持“开发者模式”开启。
-2. 点击“加载未打包的扩展程序”。
-3. 选择本项目的 `extension/dist` 目录；如果使用发布 ZIP，先解压 `kekeio-tab-extension.zip`，再选择解压后的目录。
-4. 记录扩展卡片显示的 ID。正式安装后端时，将 `chrome-extension://<扩展ID>` 填入安装向导的允许来源；本地快捷模式会自动放行格式正确的 Chrome 扩展 ID。
+<p align="center"><sub>实际新标签页效果；壁纸、网站图标与第三方商标归各自权利人所有。</sub></p>
 
-## Docker 正式部署
+## 为什么做这个项目
 
-后端只支持 Docker 正式部署。当前固定设备（LAN `192.168.50.1/24`）只需从 GitHub Release 下载 `kekeio-tab-docker-arm64.tar`，上传到已保存 `cloudflared.env` 的目录后运行：
+常见新标签页产品要么依赖厂商云服务，要么需要广泛的网站访问权限。kekeio 选择另一条路径：页面数据优先保存在当前浏览器，用户自行决定是否启用自托管同步；扩展构建产物保持零网站访问权限，后端也只暴露明确的 API 与账号页面。
+
+## 核心能力
+
+- 自定义分组、快捷方式、搜索引擎、布局和侧边工具栏。
+- 内置、远程和本地壁纸，支持轮换、遮罩与模糊效果。
+- 本地优先配置、版本化导入导出，以及冲突时显式选择本机或云端版本。
+- 单机自托管账号与配置同步，使用 Go、SQLite 和独立管理工作台。
+- 适合私人 NAS、Docker 主机和 ARM64 路由器的部署路径。
+- 通过 Cloudflare Tunnel 提供 HTTPS 同步服务，无需把后端端口转发到 WAN。
+- 每次推送到 `main` 都执行测试、安全基线与构建，并覆盖 `main-latest` Release。
+
+## 使用方式
+
+| 场景 | 需要什么 | 数据与访问方式 |
+| --- | --- | --- |
+| 只在当前浏览器使用 | 浏览器扩展 | 配置与本机壁纸留在浏览器中，不需要后端 |
+| 多浏览器或多设备同步 | 扩展 + 自托管后端 | 在个人 NAS、Docker 主机或路由器中保存账号与允许同步的配置 |
+| 外网访问同步服务 | 后端 + Cloudflare Tunnel | 扩展通过 `https://tab.kekeio.com` 访问；Tunnel 只建立出站连接 |
+
+本机图片、图标 Blob、第三方凭据和设备运行状态不会作为共享配置上传。当前同步不是浏览器厂商账号同步的替代品，详细边界见 [产品事实](PRODUCT.md)。
+
+## 下载浏览器扩展
+
+每次 `main` 验证通过后都会自动更新以下固定下载：
+
+- [下载浏览器扩展 ZIP](https://github.com/LuckytoMr/KeKeio_Tab/releases/download/main-latest/kekeio-tab-extension.zip)
+- [下载 ARM64 Docker 离线包](https://github.com/LuckytoMr/KeKeio_Tab/releases/download/main-latest/kekeio-tab-docker-arm64.tar)
+
+加载扩展：
+
+1. 解压 `kekeio-tab-extension.zip`。
+2. 打开 `chrome://extensions` 或 `edge://extensions`，启用开发者模式。
+3. 点击“加载已解压的扩展程序”，选择解压后的 `dist` 目录。
+4. 如需自托管同步，记录扩展 ID，并在后端安装向导中填入 `chrome-extension://<扩展ID>`。
+
+不要直接选择 ZIP 文件，也不要从不明来源安装重新打包的版本。
+
+## Docker 自托管
+
+正式后端统一使用 Docker。当前固定 ARM64 路由器部署从 Release 下载 `kekeio-tab-docker-arm64.tar`；它同时包含 `kekeio-tab:arm64` 和构建时最新的 ARM64 `cloudflare/cloudflared:latest`：
 
 ```sh
 docker load -i kekeio-tab-docker-arm64.tar
-# 然后执行仓库 docker命令.txt 中的两个 docker run
+# 然后按 docker命令.txt 启动 kekeio-tab 与 cloudflared 两个容器
 ```
 
-这个 tar 同时包含 `kekeio-tab:arm64` 和 GitHub 构建时最新的 `cloudflare/cloudflared:latest`，路由器无需另外 pull。应用数据固定写入 `/mnt/usb-24aeefbb/mi_docker/kekeio/data`，备份固定写入同级 `backups`；镜像会先修正这两个专用挂载点的权限，再以 UID `10001` 运行后端。Token 只写入路由器本地 `cloudflared.env` 一次，重建时继续复用。Cloudflare Published application 固定填写 `http://localhost:9009`，不再填写 bridge 网关或 HTTP Host Header。
+固定路由器环境中：
 
-直接模式链路：
+- LAN 为 `192.168.50.1/24`，应用只绑定 `192.168.50.1:9009`。
+- 数据目录为 `/mnt/usb-24aeefbb/mi_docker/kekeio/data`。
+- 备份目录为 `/mnt/usb-24aeefbb/mi_docker/kekeio/backups`。
+- `cloudflared` 使用 `--network container:kekeio-tab`，源站为 `http://localhost:9009`。
+- 不要把 `9009` 转发到 WAN，也不要把真实 Tunnel Token 提交到 GitHub。
 
-```text
-https://tab.kekeio.com -> Cloudflare Tunnel -> cloudflared -> localhost:9009
-局域网管理员 -> http://192.168.50.1:9009
-```
+完整步骤见 [路由器 Docker 部署指南](backend/deploy/router/README.md) 和 [固定 Docker 命令](docker命令.txt)。高级 Compose、Caddy 与隔离配置保留在 [`backend/deploy/router`](backend/deploy/router) 中。
 
-`cloudflared` 与后端共享网络命名空间时，后端只信任 loopback 代理并依据 Cloudflare 的 `X-Forwarded-For` 判断真实客户端；公网 `/install`、`/admin` 和管理 API 返回 `404`。LAN 管理 HTTP 是该固定路由器直启模式的显式折中，不得对 WAN 转发 `9009`。
+## 安全与隐私
 
-首次从允许的局域网打开 `/install` 会自动建立受 Cookie、CSRF、来源与过期时间保护的安装会话，不生成也不要求一次性安装码。管理员密码最低固定为 4 个 Unicode 字符；这是本项目所有者确定的局域网管理策略，普通插件用户密码规则不受影响。
+- Manifest 不声明 `host_permissions` 或 `optional_host_permissions`，构建后的扩展没有网站读取权限。
+- GitHub Gist Token 只允许发送给 `api.github.com`，不会发送给任意快捷方式站点。
+- UHDpaper 通过登录后的受限后端代理访问，后端不是任意 URL 代理。
+- 安装和管理入口只允许本机及明确配置的局域网网段；公网请求返回 `404`。
+- 安装会话保留 HttpOnly/SameSite Cookie、CSRF、来源校验、过期和并发提交保护。
+- 密钥、Cookie、Token、数据库和备份均由 `.gitignore` 排除。
 
-详细说明：
+如发现安全问题，请不要公开附带利用细节的 Issue，按照 [安全政策](SECURITY.md) 私下报告。
 
-- [路由器 Docker 部署指南](backend/deploy/router/README.md)
-- [固定 Docker 命令](docker命令.txt)
-- [Compose 配置](backend/deploy/router/compose.yaml)
-- [Caddy 路由策略](backend/deploy/router/Caddyfile)
+## 开发与验证
 
-仓库仍保留 Caddy/Compose 高级隔离配置，但 GitHub 不再为它额外构建路由器归档。
-
-Tunnel 只建立出站连接，不需要路由器开放或转发任何 WAN 端口。下面是高级 Compose 入口：
-
-```sh
-cd backend/deploy/router
-cp router.env.example .env
-# 先填写 KEKEIO_IMAGE，再编辑数据目录、LAN CIDR 和 Docker 网段
-docker compose --env-file .env -f compose.yaml pull
-docker compose --env-file .env -f compose.yaml up -d
-```
-
-当前双容器 Tunnel 模式和高级 Caddy Tunnel 模式都只建立出站连接，不需要 WAN 入站配置。若自行停用 Tunnel 并改成公网直连，才需要另行处理 DNS、证书、防火墙和端口转发；这不属于本文主路径。
-
-## GitHub 自动构建与发布
-
-`.github/workflows/publish.yml` 使用 Node.js 24 LTS，并在每次推送到 `main` 时运行后端、管理端和扩展验证。验证通过后只构建并上传两个自定义 GitHub Release 文件：
-
-- [浏览器扩展 ZIP](https://github.com/LuckytoMr/KeKeio_Tab/releases/download/main-latest/kekeio-tab-extension.zip)
-- [ARM64 Docker 镜像 tar](https://github.com/LuckytoMr/KeKeio_Tab/releases/download/main-latest/kekeio-tab-docker-arm64.tar)
-
-`kekeio-tab-docker-arm64.tar` 同时包含 `kekeio-tab:arm64` 与构建时最新的 ARM64 `cloudflare/cloudflared:latest`。普通 `main` 推送覆盖 `main-latest` 预发布；推送 `v*` 标签则上传到对应正式 Release。工作流会清理同一 Release 中不在上述白名单里的旧自定义资产，不创建 Actions Artifact，也不再构建或推送 GHCR 镜像。
-
-```sh
-git tag v0.2.2
-git push origin v0.2.2
-```
-
-GitHub Release 页面还会自动显示 `Source code (zip)` 与 `Source code (tar.gz)`；这是 GitHub 对每个标签自动提供的源码下载，不能删除，也不属于本项目上传的构建资产。
-
-## 非生产本地模式
-
-仓库仍保留 `go run ./cmd/fullpro-server dev`，仅用于开发调试，固定监听 `127.0.0.1:8787` 并使用隔离的 `.dev-data`。它不是 Docker 或正式部署入口，正式扩展仍只连接 `https://tab.kekeio.com`。
-
-## 验证
+主要技术栈为 Preact、TypeScript、Go 和 SQLite。依赖与构建命令分别记录在 [扩展说明](extension/README.md) 和 [后端说明](backend/README.md)。完整验证入口：
 
 ```powershell
 .\scripts\verify-all.ps1
 ```
+
+它会运行 Go 测试与 `go vet`、管理端测试与生产构建、扩展测试与类型检查，以及跨模块安全和产品展示基线。
+
+## 参与维护
+
+- 提交问题前请阅读 [贡献指南](CONTRIBUTING.md)。
+- Bug 报告应包含版本、复现步骤、期望行为和已脱敏日志。
+- Pull Request 必须说明影响范围，并通过 `scripts/verify-all.ps1`。
+- 真实密码、Cookie、Token、私钥、数据库或私人备份不得进入 Issue、PR、截图和提交历史。
+
+## 发布
+
+`.github/workflows/publish.yml` 在每次推送到 `main` 后验证并覆盖 `main-latest`，无需额外创建标签或手动运行工作流。Actions 只上传两个自定义 Release 资产：
+
+```text
+kekeio-tab-extension.zip
+kekeio-tab-docker-arm64.tar
+```
+
+GitHub 自动生成的 Source code ZIP/TAR.GZ 不属于项目自定义资产。

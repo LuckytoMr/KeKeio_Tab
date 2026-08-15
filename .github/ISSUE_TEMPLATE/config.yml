@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 私下报告安全漏洞
+    url: https://github.com/LuckytoMr/KeKeio_Tab/security/advisories/new
+    about: 未修复漏洞不要提交公开 Issue，请使用 GitHub Private Vulnerability Reporting。

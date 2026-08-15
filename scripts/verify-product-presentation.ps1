@@ -85,6 +85,25 @@ if ($zhLocale.appName.message -cne "kekeio" -or $enLocale.appName.message -cne "
     $failures.Add("扩展 Manifest 本地化名称必须固定为小写 kekeio")
 }
 
+$readmePath = Join-Path $root "README.md"
+$readmeText = Get-Content -LiteralPath $readmePath -Raw
+$previewRelativePath = "docs/images/kekeio-tab-preview.webp"
+$previewPath = Join-Path $root ($previewRelativePath -replace "/", [IO.Path]::DirectorySeparatorChar)
+if (-not $readmeText.Contains($previewRelativePath, [StringComparison]::Ordinal)) {
+    $failures.Add("README 必须展示效果图 $previewRelativePath")
+}
+if (-not (Test-Path -LiteralPath $previewPath -PathType Leaf)) {
+    $failures.Add("README 效果图不存在：$previewRelativePath")
+} elseif ((Get-Item -LiteralPath $previewPath).Length -le 0) {
+    $failures.Add("README 效果图为空：$previewRelativePath")
+}
+
+foreach ($publicEntry in @("CONTRIBUTING.md", "SECURITY.md")) {
+    if (-not (Test-Path -LiteralPath (Join-Path $root $publicEntry) -PathType Leaf)) {
+        $failures.Add("公开维护入口缺失：$publicEntry")
+    }
+}
+
 if ($failures.Count -gt 0) {
     $failures | ForEach-Object { Write-Error $_ }
     exit 1

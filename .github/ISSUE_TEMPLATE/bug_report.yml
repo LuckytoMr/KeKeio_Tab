@@ -1,0 +1,77 @@
+name: Bug 报告
+description: 报告可复现的功能或兼容性问题
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。请先删除密码、Cookie、Token、邮箱、数据库内容和其他私人信息。安全漏洞请改用 Security Advisory 私下报告。
+  - type: input
+    id: version
+    attributes:
+      label: 版本或提交
+      description: 例如 v0.2.1、main-latest 下载日期或提交 SHA。
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: 受影响组件
+      options:
+        - 浏览器扩展
+        - 自托管后端
+        - 管理工作台
+        - Docker 或路由器部署
+        - GitHub Actions 或发布
+        - 文档
+        - 其他
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 复现步骤
+      description: 请提供最小、稳定、可重复的步骤。
+      placeholder: |
+        1. …
+        2. …
+        3. …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: 环境
+      description: 浏览器与版本、操作系统、CPU 架构、Docker 版本等；不要包含私人网络或账号信息。
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 已脱敏的日志或截图
+      description: 请确认内容中没有凭据、个人信息或私人配置。
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已搜索现有 Issue，未发现相同报告。
+          required: true
+        - label: 我已删除所有密码、Cookie、Token、私钥和个人信息。
+          required: true
+        - label: 这不是需要私下报告的未修复安全漏洞。
+          required: true
