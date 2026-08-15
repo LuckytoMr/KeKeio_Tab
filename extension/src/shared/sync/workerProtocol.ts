@@ -7,8 +7,17 @@ export type SyncWorkerMessage =
   | { type: "auth:login"; email: string; password: string }
   | { type: "auth:resend-verification"; email: string }
   | { type: "auth:forgot-password"; email: string }
-  | { type: "auth:logout" }
-  | { type: "sync:complete-first-connection"; strategy: "use-local" | "use-remote" }
+  | {
+      type: "auth:logout";
+      expectedAccountScope: string;
+      expectedSessionGeneration: string;
+    }
+  | {
+      type: "sync:complete-first-connection";
+      strategy: "use-local" | "use-remote";
+      expectedAccountScope: string;
+      expectedSessionGeneration: string;
+    }
   | { type: "sync:notify-change" }
   | { type: "sync:flush" }
   | { type: "sync:get-conflict"; conflictId: string }
@@ -26,9 +35,18 @@ export interface WorkerRuntimePort {
   register(input: { baseUrl: string; email: string; password: string }): Promise<unknown>;
   resendVerification(input: { baseUrl: string; email: string }): Promise<unknown>;
   forgotPassword(input: { baseUrl: string; email: string }): Promise<unknown>;
-  logout(): Promise<unknown>;
+  logout(expectedSession: {
+    expectedAccountScope: string;
+    expectedSessionGeneration: string;
+  }): Promise<unknown>;
   getSession(): Promise<unknown>;
-  completeFirstConnection(strategy: "use-local" | "use-remote"): Promise<unknown>;
+  completeFirstConnection(
+    strategy: "use-local" | "use-remote",
+    expectedSession: {
+      expectedAccountScope: string;
+      expectedSessionGeneration: string;
+    }
+  ): Promise<unknown>;
   drain(): Promise<unknown>;
   getConflict(conflictId: string): Promise<unknown>;
   resolveConflict(conflictId: string, profile: SharedProfileV2): Promise<unknown>;
@@ -43,10 +61,19 @@ async function getFixedBackendSession(runtime: WorkerRuntimePort) {
   const session = await runtime.getSession();
   if (!session || typeof session !== "object") return session;
 
-  const baseUrl = (session as { baseUrl?: unknown }).baseUrl;
+  const { baseUrl, accountScope, sessionGeneration } = session as {
+    baseUrl?: unknown;
+    accountScope?: unknown;
+    sessionGeneration?: unknown;
+  };
   if (isFixedBackendUrl(baseUrl)) return session;
 
-  await runtime.logout();
+  if (typeof accountScope === "string" && typeof sessionGeneration === "string") {
+    await runtime.logout({
+      expectedAccountScope: accountScope,
+      expectedSessionGeneration: sessionGeneration
+    });
+  }
   return undefined;
 }
 
@@ -63,9 +90,15 @@ export function dispatchWorkerMessage(runtime: WorkerRuntimePort, message: SyncW
     case "auth:forgot-password":
       return runtime.forgotPassword({ baseUrl: fixedBackendUrl, email: message.email });
     case "auth:logout":
-      return runtime.logout();
+      return runtime.logout({
+        expectedAccountScope: message.expectedAccountScope,
+        expectedSessionGeneration: message.expectedSessionGeneration
+      });
     case "sync:complete-first-connection":
-      return runtime.completeFirstConnection(message.strategy);
+      return runtime.completeFirstConnection(message.strategy, {
+        expectedAccountScope: message.expectedAccountScope,
+        expectedSessionGeneration: message.expectedSessionGeneration
+      });
     case "sync:notify-change":
       return Promise.resolve({ queued: true });
     case "sync:flush":

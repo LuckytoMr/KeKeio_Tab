@@ -72,8 +72,8 @@ export async function saveProfile(profile: Profile) {
   await profileStore.save(profile);
 }
 
-export async function clearProfile() {
-  await profileStore.reset();
+export function clearProfile() {
+  return profileStore.reset();
 }
 
 export function subscribeProfileInvalidation(listener: (message: ProfileInvalidation) => void) {

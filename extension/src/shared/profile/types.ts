@@ -100,6 +100,7 @@ export type ThemeSettings = {
   sidebarSide: "left" | "right";
   showBrand: boolean;
   columns: 4 | 5 | 6 | 7 | 8;
+  /** 旧版配置与备份兼容字段；新标签页高度按当前视口自动填满。 */
   rows: 1 | 2 | 3 | 4 | 5;
   iconSize: ShortcutIconSize;
   iconShape: ShortcutIconShape;

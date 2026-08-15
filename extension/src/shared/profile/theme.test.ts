@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   getShortcutDensityMetrics,
   getShortcutGridColumnGap,
-  getShortcutGridMaxHeight,
   getShortcutGridColumnCount,
   getShortcutGridJustification,
   getShortcutIconShapeRadius,
@@ -102,19 +101,6 @@ describe("theme shortcut grid layout", () => {
         );
       }
     }
-  });
-
-  it("includes vertical padding and every row gap in the 1–5 row height contract", () => {
-    const metrics = getShortcutIconSizeMetrics("mini");
-    const comfortable = getShortcutDensityMetrics("comfortable", "mini");
-    const compact = getShortcutDensityMetrics("compact", "mini");
-
-    expect(
-      ([1, 2, 3, 4, 5] as const).map((rows) => getShortcutGridMaxHeight(rows, metrics, comfortable))
-    ).toEqual([195, 334, 473, 612, 751]);
-    expect(
-      ([1, 2, 3, 4, 5] as const).map((rows) => getShortcutGridMaxHeight(rows, metrics, compact))
-    ).toEqual([165, 292, 419, 546, 673]);
   });
 
   it("keeps every supported compact size and 4–8 column combination inside the shared rail", () => {

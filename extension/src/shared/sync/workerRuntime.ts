@@ -46,6 +46,11 @@ type AuthenticatedOptions = {
   requireReady?: boolean;
 };
 
+export type ExpectedSyncSession = {
+  expectedAccountScope: string;
+  expectedSessionGeneration: string;
+};
+
 function timestamp(value: string) {
   const parsed = Date.parse(value);
   if (!Number.isFinite(parsed)) throw new Error("AUTH_TOKEN_EXPIRY_INVALID");
@@ -297,10 +302,17 @@ export class SyncWorkerRuntime {
     return this.apiFactory(input.baseUrl).forgotPassword(input.email.trim());
   }
 
-  async logout() {
-    ++this.sessionEpoch;
-    const credentials = await this.vault.takeAndClear();
-    if (!credentials) return;
+  async logout(expectedSession: ExpectedSyncSession) {
+    const operationEpoch = this.sessionEpoch;
+    const credentials = this.validateAuthenticatedCredentials(
+      await this.vault.loadPrivate(),
+      expectedSession.expectedAccountScope,
+      expectedSession.expectedSessionGeneration,
+      {}
+    );
+    if (!(await this.vault.clearIfCurrent(credentials.sessionGeneration))) throw this.sessionChanged();
+    // 若登录在凭据清除后启动，它拥有更高的 epoch，应由较新的登录继续接管会话。
+    if (this.sessionEpoch === operationEpoch) ++this.sessionEpoch;
     const metadata = await this.store.getActiveMetadata();
     if (metadata?.accountScope === credentials.accountScope) {
       await this.store.deactivateAccount(credentials.accountScope, metadata.profileId, credentials.sessionGeneration);
@@ -314,10 +326,14 @@ export class SyncWorkerRuntime {
     return this.vault.getPublicSession();
   }
 
-  async completeFirstConnection(strategy: "use-local" | "use-remote") {
+  async completeFirstConnection(strategy: "use-local" | "use-remote", expectedSession: ExpectedSyncSession) {
     const operationEpoch = this.sessionEpoch;
-    const credentials = await this.vault.loadPrivate();
-    if (!credentials) throw new ApiError("Not signed in", 401, "AUTH_REQUIRED");
+    const credentials = this.validateAuthenticatedCredentials(
+      await this.vault.loadPrivate(),
+      expectedSession.expectedAccountScope,
+      expectedSession.expectedSessionGeneration,
+      {}
+    );
     this.assertSessionEpoch(operationEpoch);
     if (credentials.scope === "migration_read" && strategy === "use-local") {
       throw new ApiError("Migration sessions cannot write local data to the backend", 403, "MIGRATION_READ_ONLY");

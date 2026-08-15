@@ -20,12 +20,43 @@ describe("worker protocol", () => {
   });
 
   it("clears a session created for the former configurable backend", async () => {
-    const getSession = vi.fn(async () => ({ baseUrl: "https://legacy.example.test", email: "one@example.test" }));
+    const getSession = vi.fn(async () => ({
+      baseUrl: "https://legacy.example.test",
+      email: "one@example.test",
+      accountScope: "account:legacy",
+      sessionGeneration: "session:legacy"
+    }));
     const logout = vi.fn(async () => undefined);
     const runtime = { getSession, logout } as unknown as WorkerRuntimePort;
 
     await expect(dispatchWorkerMessage(runtime, { type: "auth:session" })).resolves.toBeUndefined();
-    expect(logout).toHaveBeenCalledOnce();
+    expect(logout).toHaveBeenCalledWith({
+      expectedAccountScope: "account:legacy",
+      expectedSessionGeneration: "session:legacy"
+    });
+  });
+
+  it("forwards the expected session guard for destructive session actions", async () => {
+    const logout = vi.fn(async () => ({ status: "signed-out" }));
+    const completeFirstConnection = vi.fn(async () => ({ status: "remote-applied" }));
+    const runtime = { logout, completeFirstConnection } as unknown as WorkerRuntimePort;
+    const expected = {
+      expectedAccountScope: "account:one",
+      expectedSessionGeneration: "session:one"
+    };
+
+    await expect(dispatchWorkerMessage(runtime, {
+      type: "auth:logout",
+      ...expected
+    })).resolves.toEqual({ status: "signed-out" });
+    await expect(dispatchWorkerMessage(runtime, {
+      type: "sync:complete-first-connection",
+      strategy: "use-remote",
+      ...expected
+    })).resolves.toEqual({ status: "remote-applied" });
+
+    expect(logout).toHaveBeenCalledWith(expected);
+    expect(completeFirstConnection).toHaveBeenCalledWith("use-remote", expected);
   });
 
   it("rejects unknown messages instead of silently dispatching them", async () => {

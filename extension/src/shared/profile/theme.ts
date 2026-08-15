@@ -153,17 +153,6 @@ export function getShortcutRowHeight(metrics: ShortcutIconSizeMetrics, density: 
   return Math.max(metrics.tileMinHeight, contentHeight);
 }
 
-export function getShortcutGridMaxHeight(
-  rows: ThemeSettings["rows"],
-  metrics: ShortcutIconSizeMetrics,
-  density: ShortcutDensityMetrics
-) {
-  const rowHeight = getShortcutRowHeight(metrics, density);
-  const rowGaps = Math.max(0, rows - 1) * density.rowGap;
-
-  return density.paddingTop + rows * rowHeight + rowGaps + density.paddingBottom;
-}
-
 export function getShortcutIconShapeRadius(iconShape: ShortcutIconShape, iconSize: number) {
   if (iconShape === "circle") return "999px";
   if (iconShape === "soft") return `${Math.max(4, Math.round(iconSize * 0.1))}px`;

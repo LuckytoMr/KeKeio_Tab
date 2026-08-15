@@ -19,6 +19,13 @@ function requireFullCredentials(value: WorkerCredentials | undefined) {
   return value;
 }
 
+function expectedSession(value: { accountScope: string; sessionGeneration: string }) {
+  return {
+    expectedAccountScope: value.accountScope,
+    expectedSessionGeneration: value.sessionGeneration
+  };
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason?: unknown) => void;
@@ -178,7 +185,10 @@ describe("SyncWorkerRuntime", () => {
 
     const authenticated = runtime.authenticated("account:one", "session:one", async (token) => token);
     await started.promise;
-    await runtime.logout();
+    await runtime.logout({
+      expectedAccountScope: "account:one",
+      expectedSessionGeneration: "session:one"
+    });
     response.resolve({
       user: { id: "user:one", email: "one@example.test", role: "user" },
       scope: "full",
@@ -191,6 +201,37 @@ describe("SyncWorkerRuntime", () => {
     await expect(authenticated).rejects.toMatchObject({ code: "AUTH_SESSION_CHANGED" });
     expect(await vault.loadPrivate()).toBeUndefined();
     expect(logout).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a stale logout without clearing or revoking the replacement session", async () => {
+    await vault.save({
+      version: 2,
+      scope: "full",
+      sessionGeneration: "session:new",
+      firstConnectionPending: false,
+      accountScope: "account:new",
+      baseUrl: "https://sync.example.test",
+      userId: "user:new",
+      email: "new@example.test",
+      accessToken: "access-new",
+      accessExpiresAt: 999_999,
+      refreshToken: "refresh-new",
+      refreshExpiresAt: 9_999_999,
+      updatedAt: 2
+    });
+    const logout = vi.fn(async () => undefined);
+    const runtime = new SyncWorkerRuntime(store, vault, () => ({ logout }) as unknown as WorkerApi, () => 100_000);
+
+    await expect(runtime.logout({
+      expectedAccountScope: "account:old",
+      expectedSessionGeneration: "session:old"
+    })).rejects.toMatchObject({ code: "AUTH_SESSION_CHANGED", status: 409 });
+
+    expect(await vault.getPublicSession()).toMatchObject({
+      accountScope: "account:new",
+      sessionGeneration: "session:new"
+    });
+    expect(logout).not.toHaveBeenCalled();
   });
 
   it("does not let an old drain commit into a same-account replacement login", async () => {
@@ -258,7 +299,10 @@ describe("SyncWorkerRuntime", () => {
 
     const draining = runtime.drain();
     await putStarted.promise;
-    await runtime.logout();
+    await runtime.logout({
+      expectedAccountScope: accountScope,
+      expectedSessionGeneration: "session:a"
+    });
     const replacement = await runtime.login({
       baseUrl: "https://sync.example.test",
       email: "one@example.test",
@@ -904,10 +948,45 @@ describe("SyncWorkerRuntime", () => {
     });
     expect((await store.getLocalProfile())?.profile.theme.columns).toBe(7);
 
-    const completed = await runtime.completeFirstConnection("use-remote");
+    const completed = await runtime.completeFirstConnection("use-remote", expectedSession(connected.session!));
     expect(completed.session?.firstConnectionPending).toBe(false);
     expect((await runtime.getSession())?.firstConnectionPending).toBe(false);
     expect((await store.getLocalProfile())?.profile.theme.columns).toBe(4);
+  });
+
+  it("rejects a stale first-connection decision before reading or changing the replacement session", async () => {
+    const initial = createDefaultProfile();
+    await store.initialize(initial);
+    await vault.save({
+      version: 2,
+      scope: "full",
+      sessionGeneration: "session:new",
+      firstConnectionPending: true,
+      accountScope: "account:new",
+      baseUrl: "https://sync.example.test",
+      userId: "user:new",
+      email: "new@example.test",
+      accessToken: "access-new",
+      accessExpiresAt: 999_999,
+      refreshToken: "refresh-new",
+      refreshExpiresAt: 9_999_999,
+      updatedAt: 2
+    });
+    const getProfile = vi.fn();
+    const runtime = new SyncWorkerRuntime(store, vault, () => ({ getProfile }) as unknown as WorkerApi, () => 100_000);
+
+    await expect(runtime.completeFirstConnection("use-remote", {
+      expectedAccountScope: "account:old",
+      expectedSessionGeneration: "session:old"
+    })).rejects.toMatchObject({ code: "AUTH_SESSION_CHANGED", status: 409 });
+
+    expect(getProfile).not.toHaveBeenCalled();
+    expect(await vault.getPublicSession()).toMatchObject({
+      accountScope: "account:new",
+      sessionGeneration: "session:new",
+      firstConnectionPending: true
+    });
+    expect((await store.getLocalProfile())?.profile).toEqual(initial);
   });
 
   it("keeps the outbox paused until the first-connection strategy completes", async () => {
@@ -934,7 +1013,11 @@ describe("SyncWorkerRuntime", () => {
     } as unknown as WorkerApi;
     const runtime = new SyncWorkerRuntime(store, vault, () => api, () => now);
 
-    await runtime.login({ baseUrl: "https://sync.example.test", email: "one@example.test", password: "secret-password" });
+    const connected = await runtime.login({
+      baseUrl: "https://sync.example.test",
+      email: "one@example.test",
+      password: "secret-password"
+    });
     await store.commitProfile({
       ...initial,
       updatedAt: "2026-07-12T02:20:00.000Z",
@@ -943,7 +1026,7 @@ describe("SyncWorkerRuntime", () => {
 
     await expect(runtime.drain()).resolves.toEqual({ status: "connection-pending" });
     expect(putProfile).not.toHaveBeenCalled();
-    await runtime.completeFirstConnection("use-local");
+    await runtime.completeFirstConnection("use-local", expectedSession(connected.session!));
     expect((await runtime.getSession())?.firstConnectionPending).toBe(false);
   });
 
@@ -982,11 +1065,15 @@ describe("SyncWorkerRuntime", () => {
       logout: vi.fn(async () => undefined)
     } as unknown as WorkerApi;
     const runtime = new SyncWorkerRuntime(store, vault, () => api, () => Date.parse("2026-07-12T02:30:00.000Z"));
-    await runtime.login({ baseUrl: "https://sync.example.test", email: "one@example.test", password: "secret-password" });
+    const connected = await runtime.login({
+      baseUrl: "https://sync.example.test",
+      email: "one@example.test",
+      password: "secret-password"
+    });
 
-    const completing = runtime.completeFirstConnection("use-remote");
+    const completing = runtime.completeFirstConnection("use-remote", expectedSession(connected.session!));
     await completeStarted.promise;
-    await runtime.logout();
+    await runtime.logout(expectedSession(connected.session!));
     delayedRemote.resolve(remoteRecord);
 
     await expect(completing).rejects.toMatchObject({ code: "AUTH_SESSION_CHANGED" });
@@ -1031,7 +1118,7 @@ describe("SyncWorkerRuntime", () => {
     });
     expect((await store.getLocalProfile())?.profile.theme.columns).toBe(initial.theme.columns);
 
-    await runtime.completeFirstConnection("use-remote");
+    await runtime.completeFirstConnection("use-remote", expectedSession(connected.session!));
 
     expect((await store.getLocalProfile())?.profile.theme.columns).toBe(8);
     await expect(runtime.drain()).resolves.toEqual({ status: "read-only" });
@@ -1066,7 +1153,10 @@ describe("SyncWorkerRuntime", () => {
     const api = { listStyles } as unknown as WorkerApi;
     const runtime = new SyncWorkerRuntime(store, vault, () => api, () => Date.parse("2026-07-12T02:30:00.000Z"));
 
-    await expect(runtime.completeFirstConnection("use-local")).rejects.toMatchObject({
+    await expect(runtime.completeFirstConnection("use-local", {
+      expectedAccountScope: "account:legacy",
+      expectedSessionGeneration: "session:legacy"
+    })).rejects.toMatchObject({
       code: "MIGRATION_READ_ONLY"
     });
     await expect(runtime.getCatalog("styles")).rejects.toMatchObject({
